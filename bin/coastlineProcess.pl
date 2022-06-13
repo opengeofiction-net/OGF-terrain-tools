@@ -11,7 +11,7 @@ use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 use POSIX;
 
-sub exportOverpassConvert($$);
+sub exportOverpassConvert($$$);
 sub buildOverpassQuery($$);
 sub fileExport_Overpass($$);
 
@@ -27,6 +27,9 @@ usageError() if $opt{'h'};
 
 my $OUTPUT_DIR  = ($opt{'od'} and -d $opt{'od'}) ? $opt{'od'} : '/tmp';
 my $PUBLISH_DIR = ($opt{'copyto'} and -d $opt{'copyto'}) ? $opt{'copyto'} : undef;
+
+my $OSMCOASTLINE = '/opt/opengeofiction/osmcoastline/bin/osmcoastline';
+$OSMCOASTLINE = 'osmcoastline' if( ! -x $OSMCOASTLINE );
 
 # build up Overpass query to get the top level admin_level=0 continent relations
 my $ADMIN_CONTINENT_QUERY = '[timeout:1800][maxsize:4294967296];((relation["type"="boundary"]["boundary"="administrative"]["admin_level"="0"]["ogf:id"~"^[A-Z]{2}$"];);>;);out;';
@@ -44,11 +47,47 @@ if( -f $osmFile and (stat $osmFile)[7] > 12000 )
 	# for each continent
 	foreach my $rel ( sort values %{$ctx->{_Relation}} )
 	{
-		print $rel->{'tags'}{'ogf:id'} . "\n";
-		next if( $rel->{'tags'}{'ogf:id'} ne 'BG' );
+		my $now       = time;
+		my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
+		my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
+		my $continent = $rel->{'tags'}{'ogf:id'};
+		my $relid     = $rel->{'id'};
 		
-		my($rc, $started, $pbfFile) = exportOverpassConvert \$ctx, \$rel;
-		print "XX: $rc, $started, $pbfFile\n";
+		print "\n*** $continent ** $relid ** $startedat **************************\n";
+		#next if( $continent ne 'BG' and $continent ne 'KA' and $continent ne 'TA' ); # testing
+		
+		# get osm coastline data via overpass and convert to osm.pbf
+		my($rc, $pbfFile) = exportOverpassConvert \$ctx, \$rel, $started;
+		print "XX: $rc, $startedat, $pbfFile\n";
+		
+		# run osmcoastline to validate
+		my $dbFile   = "$OUTPUT_DIR/coastline-$continent-$started.db";
+		#$pbfFile = '/home/lkind/OGF-terrain-tools/ogf-coastline-data.osm.pbf';
+		#print "$OSMCOASTLINE --verbose --srs=3857 --output-lines --output-polygons=both --output-rings --max-points=2000 --output-database=$dbFile $pbfFile 2>&1\n";
+		my $exotics = 0;
+		my $warnings = undef;
+		my $errors = undef;
+		open(my $pipe, '-|', "$OSMCOASTLINE --verbose --srs=3857 --output-lines --output-polygons=both --output-rings --max-points=2000 --output-database=$dbFile $pbfFile 2>&1") or die "Couldn't run osmcoastline: $!";
+		while( my $line = <$pipe> )
+		{
+			print $line;
+			if( $line =~ /Hole lies outside shell at or near point ([-+]?\d*\.?\d+) ([-+]?\d*\.?\d+)/ )
+			{
+				print "EXOTIC ERROR at: $1 $2\n";
+				$exotics += 1;
+			}
+			elsif( $line =~ /There were (\d+) warnings/ )
+			{
+				$warnings = $1;
+			}
+			elsif( $line =~ /There were (\d+) errors/ )
+			{
+				$errors = $1;
+			}
+		}
+		close $pipe;
+		my $issues = $warnings + $errors + $exotics;
+		print "$issues issues (warnings: $warnings; errors: $errors; exotics: $exotics)\n";
 	}
 	print "complete\n";
 	exit 0;
@@ -59,23 +98,17 @@ else
 	exit 1;
 }
 
-sub exportOverpassConvert($$)
+sub exportOverpassConvert($$$)
 {
-	my($ctxref, $relref) = @_;
+	my($ctxref, $relref, $started) = @_;
 	my $continent = $$relref->{'tags'}{'ogf:id'};
-	my $now       = time;
-	my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
-	my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
 	my $osmFile   = "$OUTPUT_DIR/coastline-$continent-$started.osm";
 	my $pbfFile   = "$OUTPUT_DIR/coastline-$continent-$started.osm.pbf";
 	my $pubFile   = "$PUBLISH_DIR/coastline-$continent.osm.pbf" if( $PUBLISH_DIR );
 	
-	print "*** $continent *** $startedat **************************\n";
-	print "* rel:", $$relref->{'id'}, ", continent:", $continent, "\n";
-	
 	my $overpass = buildOverpassQuery $ctxref, $relref;
-	print "* query: $overpass\n";
-	print "* query Overpass and save to: $osmFile\n";
+	print "query: $overpass\n";
+	print "query Overpass and save to: $osmFile\n";
 	fileExport_Overpass $osmFile, $overpass;
 	if( -f $osmFile and (stat $osmFile)[7] > 1000000 )
 	{
@@ -91,7 +124,7 @@ sub exportOverpassConvert($$)
 				print "* publish to: $pubFile\n";
 				copy $pbfFile, $pubFile;
 			}
-			return 'success', $startedat, $pbfFile;
+			return 'success', $pbfFile;
 		}
 	}
 	return 'fail';
