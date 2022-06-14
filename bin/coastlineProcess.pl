@@ -13,7 +13,7 @@ use POSIX;
 
 sub exportOverpassConvert($$$);
 sub buildOverpassQuery($$);
-sub fileExport_Overpass($$);
+sub fileExport_Overpass($$$);
 
 # parse options
 my %opt;
@@ -36,8 +36,8 @@ my $ADMIN_CONTINENT_QUERY = '[timeout:1800][maxsize:4294967296];((relation["type
 
 my $osmFile = $OUTPUT_DIR . '/continent_polygons.osm';
 print "QUERY: $ADMIN_CONTINENT_QUERY\n";
-fileExport_Overpass $osmFile, $ADMIN_CONTINENT_QUERY;
-if( -f $osmFile and (stat $osmFile)[7] > 12000 )
+fileExport_Overpass $osmFile, $ADMIN_CONTINENT_QUERY, 12000;
+if( -f $osmFile )
 {
 	# load in continent relations
 	my $ctx = OGF::Data::Context->new();
@@ -45,7 +45,7 @@ if( -f $osmFile and (stat $osmFile)[7] > 12000 )
 	$ctx->setReverseInfo();
 
 	# for each continent
-	foreach my $rel ( sort values %{$ctx->{_Relation}} )
+	foreach my $rel ( values %{$ctx->{_Relation}} )
 	{
 		my $now       = time;
 		my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
@@ -54,10 +54,13 @@ if( -f $osmFile and (stat $osmFile)[7] > 12000 )
 		my $relid     = $rel->{'id'};
 		
 		print "\n*** $continent ** $relid ** $startedat **************************\n";
-		#next if( $continent ne 'BG' and $continent ne 'KA' and $continent ne 'TA' ); # testing
+		#next if( $continent ne 'ER' ); # testing
 		
 		# get osm coastline data via overpass and convert to osm.pbf
 		my($rc, $pbfFile) = exportOverpassConvert \$ctx, \$rel, $started;
+		
+		# handle error here
+		next if( $rc eq 'fail' );
 		print "XX: $rc, $startedat, $pbfFile\n";
 		
 		# run osmcoastline to validate
@@ -109,16 +112,17 @@ sub exportOverpassConvert($$$)
 	my $overpass = buildOverpassQuery $ctxref, $relref;
 	print "query: $overpass\n";
 	print "query Overpass and save to: $osmFile\n";
-	fileExport_Overpass $osmFile, $overpass;
-	if( -f $osmFile and (stat $osmFile)[7] > 1000000 )
+	fileExport_Overpass $osmFile, $overpass, 90000;
+	if( -f $osmFile )
 	{
 		# convert to pbf
-		print "* convert to: $pbfFile\n";
+		print "convert to: $pbfFile using osmium sort\n";
 		system "osmium sort --no-progress --output=$pbfFile $osmFile";
 		
 		# and copy for web
 		if( -f $pbfFile )
 		{
+			unlink $osmFile;
 			if( $pubFile )
 			{
 				print "* publish to: $pubFile\n";
@@ -158,20 +162,31 @@ sub buildOverpassQuery($$)
 	$overpass .= qq|);(._;>;);out;|;
 }
 
-sub fileExport_Overpass($$)
+sub fileExport_Overpass($$$)
 {
-	my( $outFile, $query ) = @_;
-
-    my $data = OGF::Util::Overpass::runQuery_remote( undef, $query );
-	if( !defined $data or $data !~ /^<\?xml/ )
+	my($outFile, $query, $minSize) = @_;
+	
+	my $retries = 0;
+	while( ++$retries <= 10 )
 	{
-		print STDERR "Failure running Overpass query: $query\n";
+		sleep 3 * $retries if( $retries > 1 );
+		my $data = OGF::Util::Overpass::runQuery_remote( undef, $query );
+		if( !defined $data or $data !~ /^<\?xml/ )
+		{
+			print "Failure running Overpass query [$retries]: $query\n";
+			next;
+		}
+		elsif( length $data < $minSize )
+		{
+			my $first400 = substr $data, 0, 400;
+			my $len = length $data;
+			print "Failure running Overpass query, return too small $len [$retries]: $first400\n";
+			next;
+		}
+		
+		OGF::Util::File::writeToFile( $outFile, $data, '>:encoding(UTF-8)' );
 		return;
 	}
-	#my $len = length $data;
-	#if( length $data < 100 and 
-	#print "DATA: $len $data\n";
-	OGF::Util::File::writeToFile( $outFile, $data, '>:encoding(UTF-8)' );
 }
 
 
