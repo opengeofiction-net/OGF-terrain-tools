@@ -5,12 +5,12 @@ use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
 use strict;
 use warnings;
 use File::Copy;
+use JSON::PP;
 use OGF::Data::Context;
 use OGF::Util::File;
 use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 use POSIX;
-use JSON::PP;
 
 sub exportOverpassConvert($$$);
 sub buildOverpassQuery($$);
@@ -30,6 +30,7 @@ usageError() if $opt{'h'};
 
 my $OUTPUT_DIR  = ($opt{'od'} and -d $opt{'od'}) ? $opt{'od'} : '/tmp';
 my $PUBLISH_DIR = ($opt{'copyto'} and -d $opt{'copyto'}) ? $opt{'copyto'} : undef;
+my $MISSING_NODE_LON = -180.0; my $MISSING_NODE_INCR = 3.0;
 
 my $OSMCOASTLINE = '/opt/opengeofiction/osmcoastline/bin/osmcoastline';
 $OSMCOASTLINE = 'osmcoastline' if( ! -x $OSMCOASTLINE );
@@ -265,6 +266,17 @@ sub validateCoastline($$$$)
 			$err{'lat'} = $2; $err{'lon'} = $1;
 			push @$errs, \%err;
 			print "EXOTIC ERROR at: $1 $2\n";
+			$exotics += 1;
+		}
+		elsif( $line =~ /Missing location of node (\d+)/ )
+		{
+			my %err = ();
+			$err{'text'} = "Likely Overpass issue - missing node $1";
+			$err{'icon'} = 'red';
+			$err{'lat'} = -75.0;
+			$err{'lon'} = $MISSING_NODE_LON += $MISSING_NODE_INCR;
+			push @$errs, \%err;
+			print "EXOTIC ERROR missing node: $1\n";
 			$exotics += 1;
 		}
 		$warnings = $1 if( $line =~ /There were (\d+) warnings/ );
