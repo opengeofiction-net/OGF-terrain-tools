@@ -12,11 +12,14 @@ use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 use POSIX;
 
+sub housekeeping($$);
 sub exportOverpassConvert($$$);
 sub buildOverpassQuery($$);
 sub fileExport_Overpass($$$);
 sub validateCoastline($$$$);
 sub validateCoastlineDb($$);
+sub saveToJSON($$);
+sub publishFile($$);
 
 # parse options
 my %opt;
@@ -35,6 +38,11 @@ my $MISSING_NODE_LON = -180.0; my $MISSING_NODE_INCR = 3.0;
 my $OSMCOASTLINE = '/opt/opengeofiction/osmcoastline/bin/osmcoastline';
 $OSMCOASTLINE = 'osmcoastline' if( ! -x $OSMCOASTLINE );
 
+my $now       = time;
+my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
+my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
+housekeeping $OUTPUT_DIR, $now;
+
 # build up Overpass query to get the top level admin_level=0 continent relations
 my $ADMIN_CONTINENT_QUERY = '[timeout:1800][maxsize:4294967296];((relation["type"="boundary"]["boundary"="administrative"]["admin_level"="0"]["ogf:id"~"^[A-Z]{2}$"];);>;);out;';
 
@@ -47,10 +55,6 @@ if( -f $osmFile )
 	my $ctx = OGF::Data::Context->new();
 	$ctx->loadFromFile( $osmFile );
 	$ctx->setReverseInfo();
-
-	my $now       = time;
-	my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
-	my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
 	
 	# save coastline errors
 	my @errs;
@@ -64,6 +68,7 @@ if( -f $osmFile )
 		
 		print "\n*** $continent ** $relid ** $startedat **************************\n";
 		#next if( $continent ne 'AR' and $continent ne 'ER' and $continent ne 'KA' ); # testing
+		next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
 		
 		# get osm coastline data via overpass and convert to osm.pbf
 		my($rc, $pbfFile) = exportOverpassConvert \$ctx, \$rel, $started;
@@ -90,10 +95,14 @@ if( -f $osmFile )
 	}
 	
 	# save errors to JSON
-	my $jsonFile = $OUTPUT_DIR . '/coastline_errors.json';
-	my $json = JSON::PP->new->canonical->indent(2)->space_after;
-	my $text = $json->encode( \@errs );
-	OGF::Util::File::writeToFile($jsonFile, $text, '>:encoding(UTF-8)' );
+	my %err = ();
+	my $outputat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime;
+	$err{'control'} = 'InfoBox';
+	$err{'text'} = "Coastline check completed at <b>$outputat</b>, from $startedat run";
+	$err{'started'} = $startedat;
+	$err{'finished'} = $outputat;
+	push @errs, \%err;
+	saveToJSON 'coastline_errors.json', \@errs;
 	
 	# for each continent - construct worldwide coastlines
 	my $filesToMerge = '';
@@ -102,6 +111,7 @@ if( -f $osmFile )
 	foreach my $rel ( values %{$ctx->{_Relation}} )
 	{
 		my $continent = $rel->{'tags'}{'ogf:id'};
+		next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
 		my $goldenFile = "$OUTPUT_DIR/coastline-$continent.osm.pbf";
 		my %sum = ();
 		$sum{'continent'} = $continent;
@@ -123,7 +133,6 @@ if( -f $osmFile )
 			$nMissing++;
 		}
 		push @summary, \%sum;
-		
 	}
 	
 	# merge coastlines
@@ -131,6 +140,12 @@ if( -f $osmFile )
 	my $dbFile  = "$OUTPUT_DIR/coastline-$started.db";
 	print "merge to: $pbfFile using osmium merge\n";
 	system "osmium merge --no-progress --verbose --output=$pbfFile $filesToMerge";
+	if( ! -f $pbfFile )
+	{
+		print "issues merging world coastline\n";
+		exit 1;
+	}
+	publishFile $pbfFile, 'coastline.osm.pbf';
 	
 	# validate merged world coastline
 	my @worlderrs;
@@ -145,18 +160,52 @@ if( -f $osmFile )
 	push @summary, \%sum;
 	
 	# save summary to JSON
-	my $summaryFile = $OUTPUT_DIR . '/coastline_summary.json';
-	$json = JSON::PP->new->canonical->indent(2)->space_after;
-	$text = $json->encode( \@summary );
-	OGF::Util::File::writeToFile($summaryFile, $text, '>:encoding(UTF-8)' );
+	saveToJSON 'coastline_summary.json', \@summary;
 	
-	print "complete\n";
-	exit 0;
+	# save world errors to JSON
+	%err = ();
+	$outputat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime;
+	$err{'control'} = 'InfoBox';
+	$err{'text'} = "World coastline check completed at <b>$outputat</b>, from $startedat run - there should be no errors";
+	$err{'started'} = $startedat;
+	$err{'finished'} = $outputat;
+	push @worlderrs, \%err;
+	saveToJSON 'coastline_errors_world.json', \@worlderrs;
+	
+	if( $worldIssues == 0 )
+	{
+		print "complete\n";
+		exit 0;
+	}
+	else
+	{
+		print "issues with world coastline\n";
+		exit 1;
+	}
 }
 else
 {
 	print "Error querying overpass\n";
 	exit 1;
+}
+
+sub housekeeping($$)
+{
+	my($dir, $now) = @_;
+	my $KEEP_FOR = 60 * 30; # 30 mins
+	my $dh;
+	
+	opendir $dh, $dir;
+	while( my $file = readdir $dh )
+	{
+		next unless( $file =~ /\d{14}/ );
+		if( $now - (stat "$dir/$file")[9] > $KEEP_FOR )
+		{
+			print "deleting: $dir/$file\n";
+			unlink "$dir/$file";
+		}
+	}
+	closedir $dh;
 }
 
 sub exportOverpassConvert($$$)
@@ -165,7 +214,6 @@ sub exportOverpassConvert($$$)
 	my $continent = $$relref->{'tags'}{'ogf:id'};
 	my $osmFile   = "$OUTPUT_DIR/coastline-$continent-$started.osm";
 	my $pbfFile   = "$OUTPUT_DIR/coastline-$continent-$started.osm.pbf";
-	my $pubFile   = "$PUBLISH_DIR/coastline-$continent.osm.pbf" if( $PUBLISH_DIR );
 	
 	my $overpass = buildOverpassQuery $ctxref, $relref;
 	print "query: $overpass\n";
@@ -181,11 +229,8 @@ sub exportOverpassConvert($$$)
 		if( -f $pbfFile )
 		{
 			unlink $osmFile;
-			if( $pubFile )
-			{
-				print "* publish to: $pubFile\n";
-				copy $pbfFile, $pubFile;
-			}
+			publishFile $pbfFile, "coastline-$continent.osm.pbf";
+			
 			return 'success', $pbfFile;
 		}
 	}
@@ -415,5 +460,34 @@ sub validateCoastlineDb($$)
 		{
 			print "UNKNOWN: $geom,$osm_id,$error\n";
 		}
+	}
+}
+
+sub saveToJSON($$)
+{
+	my($file, $obj) = @_;
+	
+	my $outputFile = "$OUTPUT_DIR/$file";
+	my $publishFile = "$PUBLISH_DIR/$file" if( $PUBLISH_DIR );
+	my $json = JSON::PP->new->canonical->indent(2)->space_after;
+	my $text = $json->encode($obj);
+	print "output to: $outputFile\n";
+	OGF::Util::File::writeToFile($outputFile, $text, '>:encoding(UTF-8)');
+	if( defined $publishFile )
+	{
+		print "publish to: $publishFile\n";
+		copy $outputFile, $publishFile;
+	}
+}
+
+sub publishFile($$)
+{
+	my($file, $dest) = @_;
+	
+	my $publishFile = "$PUBLISH_DIR/$dest" if( $PUBLISH_DIR );
+	if( defined $publishFile )
+	{
+		print "publish to: $publishFile\n";
+		copy $file, $publishFile;
 	}
 }
