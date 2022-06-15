@@ -47,20 +47,22 @@ if( -f $osmFile )
 	$ctx->loadFromFile( $osmFile );
 	$ctx->setReverseInfo();
 
+	my $now       = time;
+	my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
+	my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
+	
 	# save coastline errors
 	my @errs;
+	my %issues;
 	
-	# for each continent
+	# for each continent - error check
 	foreach my $rel ( values %{$ctx->{_Relation}} )
 	{
-		my $now       = time;
-		my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
-		my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
 		my $continent = $rel->{'tags'}{'ogf:id'};
 		my $relid     = $rel->{'id'};
 		
 		print "\n*** $continent ** $relid ** $startedat **************************\n";
-		next if( $continent ne 'AR' ); # testing
+		#next if( $continent ne 'AR' and $continent ne 'ER' and $continent ne 'KA' ); # testing
 		
 		# get osm coastline data via overpass and convert to osm.pbf
 		my($rc, $pbfFile) = exportOverpassConvert \$ctx, \$rel, $started;
@@ -72,19 +74,80 @@ if( -f $osmFile )
 		
 		# run osmcoastline to validate
 		my $dbFile   = "$OUTPUT_DIR/coastline-$continent-$started.db";
-		unless( validateCoastline(\@errs, $pbfFile, $dbFile, 'quick') == 0 )
+		$issues{$continent} = validateCoastline \@errs, $pbfFile, $dbFile, 'quick';
+		unless( $issues{$continent}  == 0 )
 		{
 			print "issues with $continent coastline, will use last good\n";
 			next;
 		}
+		
+		# mark continent coastline as valid
+		my $goldenFile = "$OUTPUT_DIR/coastline-$continent.osm.pbf";
+		print "marking $continent as valid: $goldenFile\n";
+		unlink $goldenFile if( -f $goldenFile );
+		link $pbfFile, $goldenFile;
 	}
 	
 	# save errors to JSON
-	
 	my $jsonFile = $OUTPUT_DIR . '/coastline_errors.json';
 	my $json = JSON::PP->new->canonical->indent(2)->space_after;
 	my $text = $json->encode( \@errs );
 	OGF::Util::File::writeToFile($jsonFile, $text, '>:encoding(UTF-8)' );
+	
+	# for each continent - construct worldwide coastlines
+	my $filesToMerge = '';
+	my @summary;
+	my $nMissing = 0;
+	foreach my $rel ( values %{$ctx->{_Relation}} )
+	{
+		my $continent = $rel->{'tags'}{'ogf:id'};
+		my $goldenFile = "$OUTPUT_DIR/coastline-$continent.osm.pbf";
+		my %sum = ();
+		$sum{'continent'} = $continent;
+		$sum{'errors'} = $issues{$continent} if( exists $issues{$continent} );
+		$sum{'status'} = 'stale' if( !exists $issues{$continent} );
+		$sum{'status'} = 'valid' if( exists $issues{$continent} and $issues{$continent} == 0 );
+		$sum{'status'} = 'ERROR' if( exists $issues{$continent} and $issues{$continent} < 0 );
+		$sum{'status'} = 'errors, using old coastline' if( exists $issues{$continent} and $issues{$continent} > 0 );
+		
+		if( -f $goldenFile )
+		{
+			my $mtime = (stat $goldenFile)[9];
+			$sum{'mtime'} = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $mtime;
+			$filesToMerge .= $goldenFile . ' ';
+		}
+		else
+		{
+			$sum{'status'} = 'missing';
+			$nMissing++;
+		}
+		push @summary, \%sum;
+		
+	}
+	
+	# merge coastlines
+	my $pbfFile = "$OUTPUT_DIR/coastline-$started.osm.pbf";
+	my $dbFile  = "$OUTPUT_DIR/coastline-$started.db";
+	print "merge to: $pbfFile using osmium merge\n";
+	system "osmium merge --no-progress --verbose --output=$pbfFile $filesToMerge";
+	
+	# validate merged world coastline
+	my @worlderrs;
+	my $worldIssues = validateCoastline \@worlderrs, $pbfFile, $dbFile, 'full';
+	print "issues with world coastline\n" unless( $worldIssues == 0 );
+	my %sum = ();
+	$sum{'continent'} = 'world';
+	$sum{'errors'} = $worldIssues;
+	$sum{'status'} = 'valid' if( $worldIssues == 0 );
+	$sum{'status'} = 'ERROR' if( $worldIssues != 0 );
+	$sum{'mtime'} = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime time;
+	push @summary, \%sum;
+	
+	# save summary to JSON
+	my $summaryFile = $OUTPUT_DIR . '/coastline_summary.json';
+	$json = JSON::PP->new->canonical->indent(2)->space_after;
+	$text = $json->encode( \@summary );
+	OGF::Util::File::writeToFile($summaryFile, $text, '>:encoding(UTF-8)' );
 	
 	print "complete\n";
 	exit 0;
@@ -172,9 +235,9 @@ sub fileExport_Overpass($$$)
 		}
 		elsif( length $data < $minSize )
 		{
-			my $first400 = substr $data, 0, 400;
+			my $first800 = substr $data, 0, 800;
 			my $len = length $data;
-			print "Failure running Overpass query, return too small $len [$retries]: $first400\n";
+			print "Failure running Overpass query, return too small $len [$retries]: $first800\n";
 			next;
 		}
 		
