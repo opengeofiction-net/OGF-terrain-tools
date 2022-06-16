@@ -23,6 +23,8 @@ sub saveToJSON($$);
 sub publishFile($$);
 sub createShapefilePublish($$$$$);
 
+STDOUT->autoflush(1);
+
 # parse options
 my %opt;
 usageInit( \%opt, qq/ h od=s copyto=s /, << "*" );
