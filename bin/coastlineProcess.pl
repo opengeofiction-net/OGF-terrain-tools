@@ -70,7 +70,6 @@ if( -f $osmFile )
 		my $relid     = $rel->{'id'};
 		
 		print "\n*** $continent ** $relid ** $startedat **************************\n";
-		#next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
 		
 		# get osm coastline data via overpass and convert to osm.pbf
 		my($rc, $pbfFile) = exportOverpassConvert \$ctx, \$rel, $started;
@@ -113,7 +112,6 @@ if( -f $osmFile )
 	foreach my $rel ( values %{$ctx->{_Relation}} )
 	{
 		my $continent = $rel->{'tags'}{'ogf:id'};
-		#next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
 		my $goldenFile = "$OUTPUT_DIR/coastline-$continent.osm.pbf";
 		my %sum = ();
 		$sum{'continent'} = $continent;
