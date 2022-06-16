@@ -11,6 +11,7 @@ use OGF::Util::File;
 use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 use POSIX;
+use File::Path;
 
 sub housekeeping($$);
 sub exportOverpassConvert($$$);
@@ -20,6 +21,7 @@ sub validateCoastline($$$$);
 sub validateCoastlineDb($$);
 sub saveToJSON($$);
 sub publishFile($$);
+sub createShapefilePublish($$$$$);
 
 # parse options
 my %opt;
@@ -38,6 +40,7 @@ my $MISSING_NODE_LON = -180.0; my $MISSING_NODE_INCR = 3.0;
 my $OSMCOASTLINE = '/opt/opengeofiction/osmcoastline/bin/osmcoastline';
 $OSMCOASTLINE = 'osmcoastline' if( ! -x $OSMCOASTLINE );
 
+chdir $OUTPUT_DIR or die "Cannot cd to $OUTPUT_DIR\n";
 my $now       = time;
 my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
 my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
@@ -67,8 +70,7 @@ if( -f $osmFile )
 		my $relid     = $rel->{'id'};
 		
 		print "\n*** $continent ** $relid ** $startedat **************************\n";
-		#next if( $continent ne 'AR' and $continent ne 'ER' and $continent ne 'KA' ); # testing
-		next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
+		#next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
 		
 		# get osm coastline data via overpass and convert to osm.pbf
 		my($rc, $pbfFile) = exportOverpassConvert \$ctx, \$rel, $started;
@@ -111,7 +113,7 @@ if( -f $osmFile )
 	foreach my $rel ( values %{$ctx->{_Relation}} )
 	{
 		my $continent = $rel->{'tags'}{'ogf:id'};
-		next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
+		#next if( $continent ne 'ER' and $continent ne 'KA' ); # testing
 		my $goldenFile = "$OUTPUT_DIR/coastline-$continent.osm.pbf";
 		my %sum = ();
 		$sum{'continent'} = $continent;
@@ -174,6 +176,14 @@ if( -f $osmFile )
 	
 	if( $worldIssues == 0 )
 	{
+		# at this point we now have an obsolutely clean coastline db file
+		# which we can use to create land and coast shapefiles
+		
+		createShapefilePublish $dbFile, 'land-polygons-split-3857', 'land_polygons.shp', 'land_polygons', 0;
+		createShapefilePublish $dbFile, 'water-polygons-split-3857', 'water_polygons.shp', 'water_polygons', 0;
+		createShapefilePublish $dbFile, 'simplified-land-polygons-complete-3857', 'simplified_land_polygons.shp', 'land_polygons', 300;
+		createShapefilePublish $dbFile, 'simplified-water-polygons-split-3857', 'simplified_water_polygons.shp', 'water_polygons', 300;
+
 		print "complete\n";
 		exit 0;
 	}
@@ -489,5 +499,24 @@ sub publishFile($$)
 	{
 		print "publish to: $publishFile\n";
 		copy $file, $publishFile;
+	}
+}
+
+sub createShapefilePublish($$$$$)
+{
+	my($dbFile, $dir, $shapefile, $layer, $simplify) = @_;
+	
+	my $zipFile = "$dir.zip";
+	my $simplifyOpt = $simplify > 0 ? "-simplify $simplify" : '';
+	
+	rmtree $dir if( -d $dir );
+	mkdir $dir;
+	my $cmd = "ogr2ogr -f 'ESRI Shapefile' $simplifyOpt $dir/$shapefile $dbFile $layer 2>&1";
+	print "$cmd\n";
+	system $cmd ;
+	if( -f "$dir/$shapefile" )
+	{
+		system "zip -r $zipFile $dir";
+		publishFile $zipFile, $zipFile;
 	}
 }
