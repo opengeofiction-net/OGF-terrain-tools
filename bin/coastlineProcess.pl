@@ -147,6 +147,9 @@ if( -f $osmFile )
 	}
 	publishFile $pbfFile, 'coastline.osm.pbf';
 	
+	# save summary to JSON
+	saveToJSON 'coastline_summary.json', \@summary;
+	
 	# validate merged world coastline
 	my @worlderrs;
 	my $worldIssues = validateCoastline \@worlderrs, $pbfFile, $dbFile, 'full';
@@ -159,7 +162,7 @@ if( -f $osmFile )
 	$sum{'mtime'} = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime time;
 	push @summary, \%sum;
 	
-	# save summary to JSON
+	# save summary to JSON (again, now with the overall world coastline)
 	saveToJSON 'coastline_summary.json', \@summary;
 	
 	# save world errors to JSON
