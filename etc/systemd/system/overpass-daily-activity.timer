@@ -1,0 +1,10 @@
+[Unit]
+Description=OGF daily activity
+
+[Timer]
+# run daily, just after midnight
+OnCalendar=00:01
+Unit=overpass-daily-activity.service
+
+[Install]
+WantedBy=timers.target
