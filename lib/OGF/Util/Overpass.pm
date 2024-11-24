@@ -10,7 +10,7 @@ our @EXPORT_OK = qw(
 );
 
 
-my $CMD_OSM3S_QUERY = '/opt/geofictician/overpass/bin/osm3s_query';
+my $CMD_OSM3S_QUERY = '/opt/overpass/bin/osm3s_query';
 my $CMD_OSMCONVERT  = 'osmconvert64';
 
 
