@@ -6,8 +6,8 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/dailyActivitySummary.pl -degincr 1 -od /opt/opengeofiction/activity -copyto /opt/opengeofiction/sync-to-ogf/activity -overpass local
 ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/dailyActivitySummary.pl -degincr 5 -od /opt/opengeofiction/activity/5 -copyto /opt/opengeofiction/sync-to-ogf/activity/5 -overpass local
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/dailyActivitySummary.pl -degincr 1 -od /opt/opengeofiction/activity -copyto /opt/opengeofiction/sync-to-ogf/activity -overpass local
 
 [Install]
 WantedBy=default.target
