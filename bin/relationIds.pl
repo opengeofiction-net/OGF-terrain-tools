@@ -11,7 +11,7 @@ $QUERY = qq(rel["type"="boundary"]["admin_level"]["ogf:id"~"^Guai"];out;);
 $URL = $OVERPASS . uri_escape($QUERY);
 
 # load map relations
-$userAgent = LWP::UserAgent->new(keep_alive => 20);
+$userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-relationIds.pl ');
 $resp = $userAgent->get($URL);
 print STDERR "URL: $URL\n";
 my $i = 0;

@@ -366,7 +366,7 @@ sub cachedUrlTile {
 	return $outFile if -f $outFile || $hOpt->{'nocache'};
 
 	my( $suffix ) = ($url =~ /\.(\w+)$/g);
-	my $userAgent = LWP::UserAgent->new();
+	my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-LayerInfo.pm ');
 	print STDERR "GET $url\n";
 	my $resp = $userAgent->get( $url, 'Content_Type' => "image/$suffix" );
 	if( ! $resp->is_success ){

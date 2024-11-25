@@ -53,9 +53,7 @@ sub runQuery_remote {
 	my( $outFile, $queryText ) = @_;
 	my $startTimeE = time();
 
-	my $userAgent = LWP::UserAgent->new(
-		keep_alive => 20,
-	);
+	my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-Overpass.pm ');
 	if( $outFile ){
         my( $ogfFile, $osmFile ) = ( $outFile );
         if( $outFile =~ /\.ogf$/ ){

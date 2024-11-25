@@ -56,7 +56,7 @@ foreach ( split "\n", decode('utf-8', $resp) )
 }
 
 # load JSON territories
-$userAgent = LWP::UserAgent->new(keep_alive => 20);
+$userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-checkContinent.pl ');
 $resp = $userAgent->get($URL_TERRITORIES);
 $resp = decode('utf-8', $resp->content());
 $json = JSON::XS->new();

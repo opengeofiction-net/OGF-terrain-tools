@@ -308,10 +308,7 @@ sub getTerritories {
     require LWP;
 
     my $json = JSON::XS->new();
-	my $userAgent = LWP::UserAgent->new(
-		keep_alive => 20,
-	);
-
+	my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-simplifiedAdminPolygons.pl ');
 	my $resp = $userAgent->get( $URL_TERRITORIES );
 	my $x = $resp->content();
     my $aTerr = $json->decode( $resp->content() );
