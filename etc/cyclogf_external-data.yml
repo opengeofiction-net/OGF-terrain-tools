@@ -1,0 +1,29 @@
+settings:
+  temp_schema: loading
+  schema: public
+  data_dir: data
+  database: cyclogf
+  metadata_table: external_data
+sources:
+  simplified_land_polygons:
+    type: shp
+    url: https://data.opengeofiction.net/extracts/simplified-land-polygons-complete-3857.zip
+    file: simplified-land-polygons-complete-3857/simplified_land_polygons.shp
+    archive:
+      format: zip
+      files:
+        - simplified-land-polygons-complete-3857/simplified_land_polygons.dbf
+        - simplified-land-polygons-complete-3857/simplified_land_polygons.prj
+        - simplified-land-polygons-complete-3857/simplified_land_polygons.shp
+        - simplified-land-polygons-complete-3857/simplified_land_polygons.shx
+  land_polygons:
+    type: shp
+    url: https://data.opengeofiction.net/extracts/land-polygons-split-3857.zip
+    file: land-polygons-split-3857/land_polygons.shp
+    archive:
+      format: zip
+      files:
+        - land-polygons-split-3857/land_polygons.dbf
+        - land-polygons-split-3857/land_polygons.prj
+        - land-polygons-split-3857/land_polygons.shp
+        - land-polygons-split-3857/land_polygons.shx

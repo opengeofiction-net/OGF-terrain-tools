@@ -26,6 +26,12 @@ COPY_SEQUENCE_TO=$6
 ZOOM_MIN=$7
 ZOOM_MAX=$8
 
+# Is there a style?
+style_opt="--style=${STYLE_SCRIPT}"
+if [ "${STYLE_SCRIPT}" = "none" ]; then
+	style_opt="";
+fi
+
 # Is there a tag transform script?
 transform_script_opt="--tag-transform-script=${TRANSFORM_SCRIPT}"
 if [ "${TRANSFORM_SCRIPT}" = "none" ]; then
@@ -86,7 +92,7 @@ do
 		          --expire-tiles=${ZOOM_MIN}-${ZOOM_MAX} --expire-output=${efile} \
 		          --multi-geometry \
 		          --hstore \
-		          --style=${STYLE_SCRIPT} \
+		          ${style_opt} \
 		          ${transform_script_opt} \
 		          ${file}
 

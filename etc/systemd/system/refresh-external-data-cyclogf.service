@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh external data, for cyclogf
+
+[Service]
+User=ogf
+Group=ogf
+WorkingDirectory=/opt/opengeofiction/map-styles/cyclogf
+ExecStart=/opt/opengeofiction/map-styles/cyclogf/scripts/get-external-data.py
+
+[Install]
+WantedBy=default.target

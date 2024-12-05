@@ -1,0 +1,7 @@
+[Unit]
+Description=OpenGeofiction tile dirtying service for cyclogf
+
+[Service]
+User=_renderd
+Group=_renderd
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/expireTiles.sh cyclogf 5 19

@@ -1,0 +1,49 @@
+diff --git a/project.mml b/project.mml
+index ff144cf..ebc5abc 100644
+--- a/project.mml
++++ b/project.mml
+@@ -29,7 +29,7 @@ _parts:
+     srs: "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+   osm2pgsql: &osm2pgsql
+     type: "postgis"
+-    dbname: "osm"
++    dbname: "cyclogf"
+     key_field: ""
+     geometry_field: "way"
+     extent: "-20037508,-20037508,20037508,20037508"
+@@ -53,21 +53,27 @@ Stylesheet:
+ 
+ Layer:
+ - id: land-low
++  geometry: polygon
+   <<: *extents
+   Datasource:
+-    file: http://osmdata.openstreetmap.de/download/simplified-land-polygons-complete-3857.zip
+-    type: shape
+-  class: shp
+-  geometry: polygon
++    <<: *osm2pgsql
++    table: |-
++      (SELECT
++          way
++        FROM simplified_land_polygons
++      ) AS land_low
+   properties:
+     maxzoom: 9
+ - id: land-high
++  geometry: polygon
+   <<: *extents
+   Datasource:
+-    file: http://osmdata.openstreetmap.de/download/land-polygons-split-3857.zip
+-    type: shape
+-  class: shp
+-  geometry: polygon
++    <<: *osm2pgsql
++    table: |-
++      (SELECT
++          way
++        FROM land_polygons
++      ) AS land_high
+   properties:
+     minzoom: 10
+ - id: landuse_gen0
