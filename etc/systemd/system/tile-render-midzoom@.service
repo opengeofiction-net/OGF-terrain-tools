@@ -1,0 +1,11 @@
+[Unit]
+Description=Render dirty midzoom tiles for %i
+
+[Service]
+User=_renderd
+Group=_renderd
+ExecStart=render_list --all --map=%i --max-load=6 --num-threads=2 --min-zoom=6 --max-zoom=10
+After=tile-render-lowzoom@%i.service
+
+[Install]
+WantedBy=default.target

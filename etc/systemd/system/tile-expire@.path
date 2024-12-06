@@ -1,0 +1,9 @@
+[Unit]
+Description=OpenGeofiction tile dirtying service monitor for %i
+
+[Path]
+DirectoryNotEmpty=/opt/opengeofiction/render/%i/expire-queue
+Unit=tile-expire@%i.service
+
+[Install]
+WantedBy=multi-user.target

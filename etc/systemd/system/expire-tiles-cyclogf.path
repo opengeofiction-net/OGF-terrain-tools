@@ -1,9 +1,0 @@
-[Unit]
-Description=OpenGeofiction tile dirtying service monitor for cyclogf
-
-[Path]
-DirectoryNotEmpty=/opt/opengeofiction/render/cyclogf/expire-queue
-Unit=expire-tiles-cyclogf.service
-
-[Install]
-WantedBy=multi-user.target

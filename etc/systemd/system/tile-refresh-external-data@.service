@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh coastline & external data, for %i
+
+[Service]
+User=ogf
+Group=ogf
+WorkingDirectory=/opt/opengeofiction/map-styles/%i
+ExecStart=/opt/opengeofiction/map-styles/%i/scripts/get-external-data.py
+
+[Install]
+WantedBy=default.target
