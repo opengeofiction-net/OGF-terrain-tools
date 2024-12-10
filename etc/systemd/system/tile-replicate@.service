@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenGeofiction API to tile replication for %i
+Wants=postgresql.service
+After=postgresql.service
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+User=ogf
+Group=ogf
+Type=exec
+Environment=SERVER=https://data.opengeofiction.net/replication/minute
+Environment=DB=%i
+Environment=STYLE_SCRIPT=none
+Environment=TRANSFORM_SCRIPT=none
+Environment=COPY_SEQUENCE_TO=/var/www/html/tile/public_html/%i-replication-in-state.txt
+Environment=ZOOM_MIN=5
+Environment=ZOOM_MAX=19
+EnvironmentFile=-/opt/opengeofiction/map-styles/%i/ogf-settings.env
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/tileReplicate.sh %i $SERVER $DB $STYLE_SCRIPT $TRANSFORM_SCRIPT $COPY_SEQUENCE_TO $ZOOM_MIN $ZOOM_MAX
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
