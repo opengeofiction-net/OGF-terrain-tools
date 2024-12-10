@@ -1,6 +1,5 @@
 [Unit]
 Description=Render dirty midzoom tiles for %i
-After=tile-render-lowzoom@%i.service
 
 [Service]
 User=_renderd
