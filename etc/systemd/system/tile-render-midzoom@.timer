@@ -1,0 +1,11 @@
+[Unit]
+Description=Forces render of midzoom tiles, for %i
+RefuseManualStart=no
+
+[Timer]
+# run at 11:13 and 23:13
+OnCalendar=*-*-* 11,23:13:00
+Unit=tile-render-midzoom@%i.service
+
+[Install]
+WantedBy=timers.target
