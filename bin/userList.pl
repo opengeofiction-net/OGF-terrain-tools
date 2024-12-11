@@ -1,11 +1,11 @@
-#! /usr/bin/perl -w -CSDA
+#!/usr/bin/perl -w
 
 use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
 use strict;
 use warnings;
 use URI::Escape;
 use JSON::XS;
-use LWP::Simple;
+use LWP;
 use OGF::Util::File;
 use OGF::Util::Usage qw( usageInit usageError );
 
@@ -35,8 +35,11 @@ if( $opt{'cache'} and -r $opt{'cache'} )
 }
 $START_ID = $opt{'start'} || 24700 if( !defined $START_ID );
 $END_ID   = $opt{'end'}   || 24800 if( !defined $END_ID );
-my $FULL     = $opt{'full'} ? 1 : 0;
+$END_ID   = $START_ID + 50 if( $END_ID < $START_ID );
+my $FULL  = $opt{'full'} ? 1 : 0;
 print "Users: $START_ID .. $END_ID\n";
+
+my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-userList.pl/2024.12');
 
 my $last_id = undef;
 my @matching_users;
@@ -44,10 +47,14 @@ for( my $userid = $START_ID; $userid <= $END_ID; $userid++ )
 {
 	# the OGF server API doesn't support the "users" request, so one at a time...
 	my $url = "$API/user/$userid";
-	
-	my $content = get($url);
-	if( defined $content )
+	my $resp = $userAgent->get($url);
+	if( $resp->is_error )
 	{
+		last;
+	}
+	elsif( $resp->is_success )
+	{
+		my $content        = $resp->content;
 		my $id             = '';
 		my $name           = '';
 		my $profile        = '';
@@ -90,9 +97,10 @@ for( my $userid = $START_ID; $userid <= $END_ID; $userid++ )
 			
 			# get last edit by the user
 			my $url = "$API/changesets?user=$id";
-			my $content = get($url);
-			if( defined $content )
+			my $resp = $userAgent->get($url);
+			if( $resp->is_success )
 			{
+				my $content = $resp->content;
 				foreach my $line ( split "\n", $content )
 				{
 					if( $line =~ /closed_at=\"([\d\-TZ\:]+)\"/ )
