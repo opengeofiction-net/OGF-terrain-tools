@@ -544,6 +544,23 @@ sub createShapefilePublish($$$$$)
 				return createShapefilePublish $dbFile, $dir, $shapefile, $layer, $simplify - 5;
 			}
 		}
+		
+		# get textual summary
+		my $sumFile = "$dir.txt";
+		system "ogrinfo -al -ro $dir/$shapefile > $sumFile";
+		
+		# compare against last summary
+		my $lastSumFile = "$sumFile.last";
+		if( -f $lastSumFile )
+		{
+			if( system("diff $lastSumFile $sumFile > /dev/null") == 0 )
+			{
+				# identical shapefile, do not copy
+				print "not publishing $zipFile - no change\n";
+				return $simplify;
+			}
+		}
+		system "mv $sumFile $lastSumFile";
 		system "zip -r $zipFile $dir";
 		publishFile $zipFile, $zipFile;
 	}
