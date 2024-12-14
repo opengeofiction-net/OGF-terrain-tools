@@ -3,8 +3,8 @@ Description=Refresh coastline & external data, for %i
 RefuseManualStart=no
 
 [Timer]
-# run at 5 and 35 minutes past each hour
-OnCalendar=*-*-* *:5,35:00
+# run at 12 and 42 minutes past each hour
+OnCalendar=*-*-* *:12,42:00
 Unit=tile-refresh-external-data@%i.service
 
 [Install]
