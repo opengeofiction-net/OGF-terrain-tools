@@ -5,6 +5,7 @@ renice -10 $$
 
 SRCDIR=/var/www/html/wiki.opengeofiction.net/public_html
 DESTDIR=/opt/opengeofiction/backup-database
+FORCEFILE=$DESTDIR/force-full-backup
 BACKUP_QUEUE=/opt/opengeofiction/backup-to-s3-queue
 DB=ogf_wikiwiki
 DATEPRE=$(date '+%Y%m%d')
@@ -39,7 +40,7 @@ php maintenance/dumpBackup.php --current --quiet | gzip > $DESTDIR/backup-$DATES
 ln $DESTDIR/backup-$DATESTR-db.xml.gz ${BACKUP_QUEUE}/${timeframe}:wiki:backup-$DATESTR-db.xml.gz
 
 # and do the ancillary backups
-if [ ${timeframe} != "daily" ]; then
+if [[ -f "$FORCEFILE" || ${timeframe} != "daily" ]]; then
 	echo "MediaWiki dir"
 	tar zcf $DESTDIR/backup-$DATESTR-mediawiki.tar.gz --exclude=cache --exclude=images --exclude=util/extracted .
 
