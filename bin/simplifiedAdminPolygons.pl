@@ -100,6 +100,7 @@ $ctx->setReverseInfo();
 our %VERIFY_IGNORE = (
 # all know errors cleared, add issues using format:
 #   481   => 'UL130',   # 
+	459229 => 'TA250'
 );
 
 my $hSharedBorders = {};
