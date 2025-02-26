@@ -50,7 +50,6 @@ for( my $userid = $START_ID; $userid <= $END_ID; $userid++ )
 	my $resp = $userAgent->get($url);
 	if( $resp->is_error )
 	{
-		last;
 	}
 	elsif( $resp->is_success )
 	{
