@@ -13,7 +13,7 @@ fi
 BASE=$1          # /opt/opengeofiction/backup
 DB=$2            # ogfdevapi
 PUBLISH=$3       # /var/www/html/data.opengeofiction.net/public_html/backups
-MINFREE=12582912 # 12GB
+MINFREE=20971520 # 20GB
 TIMESTAMP=`date "+%Y%m%d_%H%M%S%Z"`
 PLANET_DUMP_NG=/opt/opengeofiction/planet-dump-ng/bin/planet-dump-ng
 PLANET_DUMP_NG_THREADS=1
@@ -58,7 +58,7 @@ renice -n 10 $$
 
 # ensure we're not already running
 if ! mkdir ${LOCKFILE} 2>/dev/null; then
-	echo "$0 is already running" >&2
+	echo "backup is already running" >&2
 	exit 1
 else
 	# release lock on clean exit, and if ...
