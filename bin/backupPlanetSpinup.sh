@@ -26,7 +26,7 @@ PLANET_DUMP_NG_THREADS=6
 
 # linode settings
 LINODECLI=~/.local/bin/linode-cli
-REGION=nl-ams
+REGION=us-west
 TYPE=g6-standard-6
 IMAGE=linode/ubuntu24.04
 VLAN_LABEL=backup
