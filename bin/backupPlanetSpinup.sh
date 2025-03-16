@@ -33,6 +33,7 @@ VLAN_LABEL=backup
 VLAN_HOST_IP=10.98.117.1 # 98=b; 117=u
 VLAN_CLIENT_IP=10.98.117.2
 
+#### section 1: ensure dirs exist, tools installed #############################
 # ensure the backups directory exists and is writable 
 if [ ! -w "${BASE}/" ]; then
 	echo "ERROR: ${BASE} does not exist or not writable"
@@ -57,6 +58,27 @@ echo "deleting old published backups..."
 find "${PUBLISH}/" -maxdepth 1 -name '*_ogf-planet-monthly.osm.pbf' -mmin +$((60*24*365)) -ls -delete
 find "${PUBLISH}/" -maxdepth 1 -name '*_ogf-planet-weekly.osm.pbf' -mmin +$((60*24*30)) -ls -delete
 find "${PUBLISH}/" -maxdepth 1 -name '*_ogf-planet.osm.pbf' -mmin +$((60*24*7)) -ls -delete
+
+# files & dirs used - work out if daily, weekly, monthly or yearly
+backup_pg=${TIMESTAMP}.dmp
+backup_tmp=${TIMESTAMP}_ogf-planet
+backup_pbf=${TIMESTAMP}_ogf-planet.osm.pbf
+lastthu=$(ncal -h | awk '/Th/ {print $NF}')
+today=$(date +%-d)
+timeframe=daily
+if [[ $(date +%u) -eq 4 ]]; then
+	backup_pbf=${TIMESTAMP}_ogf-planet-weekly.osm.pbf
+	timeframe=weekly
+	if [[ $lastthu -eq $today ]]; then
+		backup_pbf=${TIMESTAMP}_ogf-planet-monthly.osm.pbf
+		timeframe=monthly
+		if [[ $(date +%-m) -eq 12 ]]; then
+			backup_pbf=${TIMESTAMP}_ogf-planet-yearly.osm.pbf
+			timeframe=yearly
+		fi
+	fi
+fi
+latest_pbf=ogf-planet.osm.pbf
 
 # make sure there is enough free space
 cd "${BASE}"
@@ -102,6 +124,7 @@ else
 	echo "$0 got lock"
 fi
 
+#### section 2: setup ssh keys and cloud-init config file ######################
 # generate a 128 character password, which we will not use to login
 password=$(tr -dc 'A-Za-z0-9^=+' < /dev/urandom | head -c 128)
 
@@ -168,6 +191,7 @@ runcmd:
 EOF
 cloudinit=$(base64 -w0 $TIMESTAMP.yml)
 
+#### section 3: create the cloud server ########################################
 # create and provision the linode
 echo "creating Linode..."
 output=$(${LINODECLI} linodes create \
@@ -193,6 +217,7 @@ echo "created Linode ${linode_id} ${LABEL} on ${linode_ip}"
 
 # update our trap, to ensure we always delete the linode on exit
 trap "exit" INT TERM
+#trap "echo deleting Linode ${linode_id}; ${LINODECLI} linodes rm ${linode_id}; rm -rf ${LOCKFILE}; exit" EXIT
 trap "echo deleting Linode ${linode_id}; echo ${LINODECLI} linodes rm ${linode_id}; rm -rf ${LOCKFILE}; exit" EXIT
 
 # save away known host key
@@ -213,32 +238,11 @@ while [[ "$status" != "status: done" ]]; do
 done
 echo "provisioning... $(date) done ($status)"
 
-# files & dirs used - work out if daily, weekly, monthly or yearly
-backup_pg=${TIMESTAMP}.dmp
-backup_tmp=${TIMESTAMP}_ogf-planet
-backup_pbf=${TIMESTAMP}_ogf-planet.osm.pbf
-lastthu=$(ncal -h | awk '/Th/ {print $NF}')
-today=$(date +%-d)
-timeframe=daily
-if [[ $(date +%u) -eq 4 ]]; then
-	backup_pbf=${TIMESTAMP}_ogf-planet-weekly.osm.pbf
-	timeframe=weekly
-	if [[ $lastthu -eq $today ]]; then
-		backup_pbf=${TIMESTAMP}_ogf-planet-monthly.osm.pbf
-		timeframe=monthly
-		if [[ $(date +%-m) -eq 12 ]]; then
-			backup_pbf=${TIMESTAMP}_ogf-planet-yearly.osm.pbf
-			timeframe=yearly
-		fi
-	fi
-fi
-latest_pbf=ogf-planet.osm.pbf
-
+#### section 4: do the backup ##################################################
 # money shot: now run the backup & planet dump on the new linode
 ssh -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${linode_ip} <<EOF
 # create the postgres backup dump file
 echo "backing up to ${backup_pg}"
-#dd if=/dev/urandom of=${backup_pg} bs=4M count=10
 pg_dump -h ${VLAN_HOST_IP} --format=custom --file=${backup_pg} ${DB}
 if [ \$? -ne 0 ]; then
 	echo "ERROR: backup failed"
@@ -246,7 +250,6 @@ else
 	mkdir ${backup_tmp}
 	cd ${backup_tmp}
 	# run planet-dump-ng
-	#gzip -c ../${backup_pg} > ../${backup_pbf}
 	${PLANET_DUMP_NG} --pbf=../${backup_pbf} --dump-file=../${backup_pg} --max-concurrency=${PLANET_DUMP_NG_THREADS}
 	if [ \$? -ne 0 ]; then
 		echo "ERROR: planet-dump-ng failed"
@@ -256,6 +259,7 @@ else
 fi
 EOF
 
+#### section 5: copy files locally and publish #################################
 # copy the dmp file locally
 if [ ${timeframe} != "daily" ]; then
 	echo "copying ${backup_pg} locally..."
@@ -291,7 +295,6 @@ else
 	echo "ERROR: failed to copy ${backup_pbf} locally $?"
 fi
 
-echo "== WORK IN PROGRESS =="
 echo "== connect to server using:"
 echo "ssh -i ${BASE}/${sshkeypriv} -oUserKnownHostsFile=${BASE}/${sshkeyknownhost} ogf@${linode_ip}"
 echo "== delete server using:"
