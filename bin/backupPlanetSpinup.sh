@@ -213,7 +213,7 @@ if [ $? -ne 0 ]; then
 fi
 echo "creating Linode: ${output}"
 read -r linode_id unused_label unused_region unused_type unused_image linode_status linode_ip unused_enc <<< ${output}
-echo "created Linode ${linode_id} ${LABEL} on ${linode_ip}"
+echo "created Linode ${linode_id} ${LABEL} on ${linode_ip} / ${VLAN_CLIENT_IP}"
 
 # update our trap, to ensure we always delete the linode on exit
 trap "exit" INT TERM
@@ -222,6 +222,7 @@ trap "echo deleting Linode ${linode_id}; echo ${LINODECLI} linodes rm ${linode_i
 
 # save away known host key
 echo "${linode_ip} ${sshkey}" > ${sshkeyknownhost}
+echo "${VLAN_CLIENT_IP} ${sshkey}" >> ${sshkeyknownhost}
 
 # wait for provisioning to complete
 status="status: init"
@@ -234,13 +235,13 @@ while [[ "$status" != "status: done" ]]; do
 	fi
 	echo "provisioning... $(date) waiting... ($status)"
 	sleep 20
-	status=$(ssh -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${linode_ip} cloud-init status)
+	status=$(ssh -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${VLAN_CLIENT_IP} cloud-init status)
 done
 echo "provisioning... $(date) done ($status)"
 
 #### section 4: do the backup ##################################################
 # money shot: now run the backup & planet dump on the new linode
-ssh -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${linode_ip} <<EOF
+ssh -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${VLAN_CLIENT_IP} <<EOF
 # create the postgres backup dump file
 echo "backing up to ${backup_pg}"
 pg_dump -h ${VLAN_HOST_IP} --format=custom --file=${backup_pg} ${DB}
@@ -263,7 +264,7 @@ EOF
 # copy the dmp file locally
 if [ ${timeframe} != "daily" ]; then
 	echo "copying ${backup_pg} locally..."
-	scp -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${linode_ip}:${backup_pg} .
+	scp -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${VLAN_CLIENT_IP}:${backup_pg} .
 	if [ $? -eq 0 ]; then
 		# queue for backup to S3 (note always weekly here)
 		if [ -w "${BACKUP_QUEUE}/" ]; then
@@ -276,7 +277,7 @@ fi
 
 # copy the planet file locally
 echo "copying ${backup_pbf} locally..."
-scp -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${linode_ip}:${backup_pbf} .
+scp -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${VLAN_CLIENT_IP}:${backup_pbf} .
 if [ $? -eq 0 ]; then
 	# copy to the publish dir
 	if [ -f "${PUBLISH}/${latest_pbf}" ]; then
@@ -296,6 +297,6 @@ else
 fi
 
 echo "== connect to server using:"
-echo "ssh -i ${BASE}/${sshkeypriv} -oUserKnownHostsFile=${BASE}/${sshkeyknownhost} ogf@${linode_ip}"
+echo "ssh -i ${BASE}/${sshkeypriv} -oUserKnownHostsFile=${BASE}/${sshkeyknownhost} ogf@${VLAN_CLIENT_IP}"
 echo "== delete server using:"
 echo "linode-cli linodes rm ${linode_id}"
