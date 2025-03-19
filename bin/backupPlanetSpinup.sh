@@ -229,8 +229,8 @@ status="status: init"
 iteration=0
 while [[ "$status" != "status: done" ]]; do
 	((iteration++))
-	if [[ $iteration -gt 10 ]]; then
-		echo "ERROR: giving up provisioning after 10 waits"
+	if [[ $iteration -gt 25 ]]; then
+		echo "ERROR: giving up provisioning after 25 waits"
 		exit 121
 	fi
 	echo "provisioning... $(date) waiting... ($status)"
@@ -241,7 +241,7 @@ echo "provisioning... $(date) done ($status)"
 
 #### section 4: do the backup ##################################################
 # money shot: now run the backup & planet dump on the new linode
-ssh -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${VLAN_CLIENT_IP} <<EOF
+ssh -T -i ${sshkeypriv} -oUserKnownHostsFile=${sshkeyknownhost} ogf@${VLAN_CLIENT_IP} <<EOF
 # create the postgres backup dump file
 echo "backing up to ${backup_pg}"
 pg_dump -h ${VLAN_HOST_IP} --format=custom --file=${backup_pg} ${DB}
