@@ -217,8 +217,7 @@ echo "created Linode ${linode_id} ${LABEL} on ${linode_ip} / ${VLAN_CLIENT_IP}"
 
 # update our trap, to ensure we always delete the linode on exit
 trap "exit" INT TERM
-#trap "echo deleting Linode ${linode_id}; ${LINODECLI} linodes rm ${linode_id}; rm -rf ${LOCKFILE}; exit" EXIT
-trap "echo deleting Linode ${linode_id}; echo ${LINODECLI} linodes rm ${linode_id}; rm -rf ${LOCKFILE}; exit" EXIT
+trap "echo deleting Linode ${linode_id}; ${LINODECLI} linodes rm ${linode_id}; rm -rf ${LOCKFILE}; exit" EXIT
 
 # save away known host key
 echo "${linode_ip} ${sshkey}" > ${sshkeyknownhost}
@@ -295,8 +294,3 @@ if [ $? -eq 0 ]; then
 else
 	echo "ERROR: failed to copy ${backup_pbf} locally $?"
 fi
-
-echo "== connect to server using:"
-echo "ssh -i ${BASE}/${sshkeypriv} -oUserKnownHostsFile=${BASE}/${sshkeyknownhost} ogf@${VLAN_CLIENT_IP}"
-echo "== delete server using:"
-echo "linode-cli linodes rm ${linode_id}"
