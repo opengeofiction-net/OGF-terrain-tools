@@ -126,7 +126,7 @@ fi
 
 #### section 2: setup ssh keys and cloud-init config file ######################
 # generate a 128 character password, which we will not use to login
-password=$(tr -dc 'A-Za-z0-9^=+' < /dev/urandom | head -c 128)
+password=$(head -c 128 <(tr -dc 'A-Za-z0-9^=+' < /dev/urandom))
 
 # setup a dedicated ssh key, we use this as the host key for the
 # server, and for user access
