@@ -97,6 +97,7 @@ if [ ! -x "${LINODECLI}" ]; then
 	echo "ERROR: linode-cli is not installed at ${LINODECLI}"
 	exit 3
 fi
+LINODECLI="${LINODECLI} --no-defaults --suppress-warnings"
 
 # ensure linode-cli access token is set
 # see https://techdocs.akamai.com/cloud-computing/docs/manage-personal-access-tokens and https://cloud.linode.com/profile/tokens
@@ -195,7 +196,7 @@ cloudinit=$(base64 -w0 $TIMESTAMP.yml)
 # create and provision the linode
 echo "creating Linode..."
 output=$(${LINODECLI} linodes create \
-	--text --no-headers --no-defaults \
+	--text --no-headers \
 	--region ${REGION} \
 	--type ${TYPE} \
 	--image ${IMAGE} \
