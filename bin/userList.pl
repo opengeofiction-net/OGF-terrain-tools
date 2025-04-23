@@ -3,6 +3,7 @@
 use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
 use strict;
 use warnings;
+use Encode;
 use URI::Escape;
 use JSON::XS;
 use LWP;
@@ -11,6 +12,8 @@ use OGF::Util::Usage qw( usageInit usageError );
 
 my $BASE  = 'https://opengeofiction.net';
 my $API   = "$BASE/api/0.6";
+
+binmode(STDOUT, ":utf8");
 
 my %opt;
 usageInit( \%opt, qq/ h output=s cache=s start=i end=i full /, << "*" );
@@ -53,7 +56,7 @@ for( my $userid = $START_ID; $userid <= $END_ID; $userid++ )
 	}
 	elsif( $resp->is_success )
 	{
-		my $content        = $resp->content;
+		my $content        = decode('utf-8', $resp->content);
 		my $id             = '';
 		my $name           = '';
 		my $profile        = '';
