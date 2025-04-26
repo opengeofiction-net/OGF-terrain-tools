@@ -7,6 +7,7 @@ use feature 'unicode_strings' ;
 use Date::Format;
 use Encode;
 use JSON::XS;
+use LWP;
 use OGF::Data::Context;
 use OGF::Geo::Topology;
 use OGF::Util::File;
@@ -14,6 +15,7 @@ use OGF::Util::Line;
 use OGF::Util::Usage qw( usageInit usageError );
 use OGF::View::TileLayer;
 use URI::Escape;
+use Data::Dumper;
 
 sub parseDrivingSide($);
 sub parseEconomy($);
@@ -52,6 +54,7 @@ usageError() if $opt{'h'};
 my $OUTPUT_DIR  = $opt{'od'}     || '/tmp';
 my $PUBLISH_DIR = $opt{'copyto'} || '/tmp';
 my($OUTFILE_NAME, $ADMIN_RELATION_QUERY);
+my $URL_SETTINGS = 'https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration/settings?action=raw';
 
 housekeeping $OUTPUT_DIR, time;
 
@@ -89,9 +92,16 @@ if( ! $osmFile )
 }
 exit if( ! -f $osmFile );
 
+# load territories
 my $ctx = OGF::Data::Context->new();
 $ctx->loadFromFile( $osmFile );
 $ctx->setReverseInfo();
+
+# load JSON settings
+my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-adminPolygonsToMultimap.pl/2025.04');
+my $resp = $userAgent->get($URL_SETTINGS);
+die qq/Cannot read $URL_SETTINGS/ unless( $resp->is_success );
+my $settings = JSON::XS->new->utf8->decode ($resp->content);
 
 # for each territory
 my @ters;
@@ -136,44 +146,41 @@ foreach my $rel ( values %{$ctx->{_Relation}} )
 	
 	$ter{'is_in:region'}         = parseRegion $rel->{'tags'}{'is_in:region'};
 	
+	# membership of international organisations
 	my @orgs;
-	$ter{'organization:AN'}      = parseOrganization $rel->{'tags'}{'organization:AN'},     'member', ['member', 'no'];
-	push @orgs, 'AN' if( $ter{'organization:AN'} ne '' );
-	$ter{'organization:AC'}      = parseOrganization $rel->{'tags'}{'organization:AC'},     '',       ['member', 'observer'];
-	push @orgs, 'AC' if( $ter{'organization:AC'} ne '' );
-	$ter{'organization:ASUN'}    = parseOrganization $rel->{'tags'}{'organization:ASUN'},   '',       ['member', 'observer', 'partner'];
-	push @orgs, 'ASUN' if( $ter{'organization:ASUN'} ne '' );
-	$ter{'organization:Egalia'}  = parseOrganization $rel->{'tags'}{'organization:Egalia'}, '',       ['member', 'observer'];
-	push @orgs, 'Egalia' if( $ter{'organization:Egalia'} ne '' );
-	$ter{'organization:IC'}      = parseOrganization $rel->{'tags'}{'organization:IC'},     '',       ['member', 'observer'];
-	push @orgs, 'IC' if( $ter{'organization:IC'} ne '' );
-	$ter{'organization:TCC'}     = parseOrganization $rel->{'tags'}{'organization:TCC'},    '',       ['member', 'observer'];
-	push @orgs, 'TCC' if( $ter{'organization:TCC'} ne '' );
+	foreach my $org ( @{$settings->{organizations}} )
+	{
+		my $tag = 'organization:' . $org->{name};
+		$ter{$tag} = parseOrganization $rel->{'tags'}{$tag}, $org->{default_membership}, $org->{memberships};
+		push @orgs, $org->{name} if( $ter{$tag} ne '' and $ter{$tag} ne 'no' );
+	}
 	$ter{'organizations'} = \@orgs;
 	
+	# power supply
 	$ter{'power_supply'}           = parsePowerSupply $rel->{'tags'}{'power_supply'};
 	$ter{'power_supply:voltage'}   = parsePowerSupplyVoltage $rel->{'tags'}{'power_supply:voltage'};
 	$ter{'power_supply:frequency'} = parsePowerSupplyFrequency $rel->{'tags'}{'power_supply:frequency'};
 	$ter{'power_supply:range'}     = parsePowerSupplyRange $ter{'power_supply:voltage'}, $ter{'power_supply:frequency'};
 	
+	# territory names in different languages, with some real-world
+	# languages used as aliases for in-world ones
 	my %langnames;
-	$langnames{'castellanese'} = $rel->{'tags'}{'name:es'} if exists( $rel->{'tags'}{'name:es'} );
-	$langnames{'florescentan'} = $rel->{'tags'}{'name:pt'} if exists( $rel->{'tags'}{'name:pt'} );
-	$langnames{'franquese'}    = $rel->{'tags'}{'name:fr'} if exists( $rel->{'tags'}{'name:fr'} );
-	$langnames{'ingerlish'}    = $rel->{'tags'}{'name:en'} if exists( $rel->{'tags'}{'name:en'} );
-	$langnames{'kalmish'}      = $rel->{'tags'}{'name:de'} if exists( $rel->{'tags'}{'name:de'} );
-	$langnames{'lechian'}      = $rel->{'tags'}{'name:pl'} if exists( $rel->{'tags'}{'name:pl'} );
-	$langnames{'lentian'}      = $rel->{'tags'}{'name:nl'} if exists( $rel->{'tags'}{'name:nl'} );
-	$langnames{'renminyu'}     = $rel->{'tags'}{'name:zh'} if exists( $rel->{'tags'}{'name:zh'} );
-	$langnames{'surian'}       = $rel->{'tags'}{'name:ru'} if exists( $rel->{'tags'}{'name:ru'} );
+	my %langignore;
+	foreach my $la ( @{$settings->{language_aliases}} )
+	{
+		if( $la->{language} eq 'IGNORE' )
+		{
+			$langignore{$la->{language}} = $la->{language};
+			next;
+		}
+		$langnames{$la->{language}} = $rel->{'tags'}{$la->{alias}} if( exists $rel->{'tags'}{$la->{alias}} );
+	}
 	foreach my $tag ( keys %{$rel->{'tags'}} )
 	{
 		next unless( $tag =~ /^name:([a-z]{4,20})/ );
 		my $lang = $1;
 		my $name = $rel->{'tags'}{$tag};
-		next if( $lang eq 'official' );
-		next if( $lang eq 'officialen' );
-		next if( $lang eq 'pronunciation' );
+		next if exists $langignore{$lang};
 		$langnames{$lang} = $name;
 	}
 	$ter{'names'} = \%langnames;
@@ -210,9 +217,10 @@ sub parseEconomy($)
 sub parseEconomyHdi($)
 {
 	my($var) = @_;
+	my $ret = 0.65;
 	
-	return $var + 0.0 if( defined $var and $var =~ /^[\d\.]+$/ and $var >= 0.0 and $var <= 1.0 );
-	return '';
+	$ret = $var + 0.0 if( defined $var and $var =~ /^[\d\.]+$/ and $var >= 0.0 and $var <= 1.0 );
+	return $ret;
 }
 
 sub parseEconomyGdp($)
@@ -340,6 +348,7 @@ sub parseRegion($)
 sub parseOrganization($$$)
 {
 	my($var, $default, $values) = @_;
+	$default = '' if( !$default );
 	
 	return $default if( !defined $var );
 	foreach my $valid ( @$values )
