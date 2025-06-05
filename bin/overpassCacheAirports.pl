@@ -212,19 +212,38 @@ for my $record ( @$records )
 		$entry->{'runways:count'}      = '';
 		$entry->{'gates:count'}        = '';
 		$entry->{'terminals:count'}    = '';
+		$entry->{'terminals'}          = ();
 		
 		# parse the airport ref, and check unique
 		$entry->{'ref'} = parseRef $record->{tags}->{ref}, $record->{tags}->{iata};
 		if( !defined $entry->{'ref'} )
 		{
-			#print "$entry->{'ogf:id'},$id,$entry->{'name'} --> invalid ref\n";
+			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> invalid ref\n";
 			$entry = {};
 			next;
 		}
 		$entry->{'ref'} = uc $entry->{'ref'};
 		if( exists $refs{$entry->{'ref'}} )
 		{
-			#print "$entry->{'ogf:id'},$id,$entry->{'name'} --> duplicate ref: $entry->{'ref'}\n";
+			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> duplicate ref: $entry->{'ref'}\n";
+			$entry = {};
+			next;
+		}
+		
+		# don't include every type of aerodrome
+		my $aerodromeType = $record->{tags}->{'aerodrome:type'} || $record->{tags}->{aerodrome};
+		if( defined $aerodromeType and ($aerodromeType eq 'gliding' or
+		                                $aerodromeType eq 'private' or
+		                                $aerodromeType eq 'military') )
+		
+		{
+			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> skipping aerodrome:type=$aerodromeType\n";
+			$entry = {};
+			next;
+		}
+		elsif( defined $record->{tags}->{military} and $record->{tags}->{military} eq 'airfield' )
+		{
+			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> skipping military=airfield\n";
 			$entry = {};
 			next;
 		}
@@ -252,7 +271,12 @@ for my $record ( @$records )
 	# is this an terminal?
 	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'terminal' )
 	{
-		$entry->{'terminals:count'}++;
+		my $name = parseStr $record->{tags}->{name}, $record->{tags}->{ref}, undef, 30;
+		if( defined $name )
+		{
+			$entry->{'terminals:count'}++;
+			push @{$entry->{'terminals'}}, $name;
+		}
 	}
 	else
 	{
@@ -330,7 +354,7 @@ sub housekeeping($$)
 	opendir $dh, $dir;
 	while( my $file = readdir $dh )
 	{
-		next unless( $file =~ /^economy_\d{14}\.json/ );
+		next unless( $file =~ /^airport_\d{14}\.json/ );
 		if( $now - (stat "$dir/$file")[9] > $KEEP_FOR )
 		{
 			print "deleting: $dir/$file\n";
