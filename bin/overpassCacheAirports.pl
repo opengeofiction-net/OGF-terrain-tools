@@ -12,6 +12,7 @@ use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 
 sub parseRef($$);
+sub parseStr($$$$);
 sub parseContinent($$);
 sub parseSector($);
 sub parseScope($);
@@ -56,7 +57,11 @@ foreach.territories->.territory(
     wr(pivot.airport)->.airportobj;
     .airportobj out tags center;
     way(area.airport)[aeroway=runway][ref](if: is_closed() == 0);
-    out tags center;
+    out tags;
+    node(area.airport)[aeroway=gate];
+    out tags;
+    nwr(area.airport)[aeroway=terminal];
+    out tags;
   );
 );
 ---EOF---
@@ -76,7 +81,11 @@ foreach.territories->.territory(
     wr(pivot.airport)->.airportobj;
     .airportobj out tags center;
     way(area.airport)[aeroway=runway][ref](if: is_closed() == 0);
-    out tags center;
+    out tags;
+    node(area.airport)[aeroway=gate];
+    out tags;
+    nwr(area.airport)[aeroway=terminal];
+    out tags;
   );
 );
 ---EOF---
@@ -140,17 +149,24 @@ my @out;
 my %refs;
 my $records = $results->{elements};
 my %currentTerritory;
+my $entry = {};
 print "parsing airports JSON...\n";
 for my $record ( @$records )
 {
-	my %entry = ();
-
-	# if we don't have a name, you're not getting in
 	my $id = substr($record->{type}, 0, 1) . $record->{id};
 	
 	# is this a territory?
 	if( exists $record->{tags}->{boundary} and $record->{tags}->{boundary} eq 'administrative' )
 	{
+		# current airport entry to flush out?
+		if( exists $entry->{'ogf:id'} )
+		{
+			push @out, $entry;
+			print "$entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
+			$refs{$entry->{'ref'}} = $entry->{'ref'};
+			$entry = {};
+		}
+		
 		%currentTerritory = ();
 		
 		# is the territory canonical?
@@ -171,44 +187,84 @@ for my $record ( @$records )
 	# is this an airport?
 	elsif( exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'aerodrome' )
 	{
+		# current airport entry to flush out?
+		if( exists $entry->{'ogf:id'} )
+		{
+			push @out, $entry;
+			print "$entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
+			$refs{$entry->{'ref'}} = $entry->{'ref'};
+			$entry = {};
+		}
 		# valid territory?
 		next if( !exists $currentTerritory{'ogf:id'} );
 		
-		$entry{'is_in:ogfId'}        = $currentTerritory{'ogf:id'};
-		$entry{'is_in:continent'}    = $currentTerritory{'is_in:continent'};
-		$entry{'is_in:country'}      = $currentTerritory{'is_in:country'};
-		$entry{'is_in:country:wiki'} = $currentTerritory{'is_in:country:wiki'};
-		$entry{'id'}                 = $record->{id};
-		$entry{'type'}               = $record->{type};
-		$entry{'name'}               = $record->{tags}->{name};
-		$entry{'lat'}                = $record->{center}->{lat};
-		$entry{'lon'}                = $record->{center}->{lon};
+		$entry->{'ogf:id'}             = $currentTerritory{'ogf:id'};
+		$entry->{'is_in:continent'}    = $currentTerritory{'is_in:continent'};
+		$entry->{'is_in:country'}      = $currentTerritory{'is_in:country'};
+		$entry->{'is_in:country:wiki'} = $currentTerritory{'is_in:country:wiki'};
+		$entry->{'id'}                 = $id;
+		$entry->{'name'}               = $record->{tags}->{name};
+		$entry->{'description'}        = parseStr $record->{tags}->{description}, undef, '', 100;
+		$entry->{'serves'}             = parseStr $record->{tags}->{serves}, $record->{tags}->{'is_in:city'}, '', undef;
+		$entry->{'lat'}                = $record->{center}->{lat};
+		$entry->{'lon'}                = $record->{center}->{lon};
+		$entry->{'runways'}            = ();
+		$entry->{'runways:count'}      = '';
+		$entry->{'gates:count'}        = '';
+		$entry->{'terminals:count'}    = '';
 		
 		# parse the airport ref, and check unique
-		$entry{'ref'} = parseRef $record->{tags}->{ref}, $record->{tags}->{iata};
-		if( !defined $entry{'ref'} )
+		$entry->{'ref'} = parseRef $record->{tags}->{ref}, $record->{tags}->{iata};
+		if( !defined $entry->{'ref'} )
 		{
-			#print "$entry{'is_in:ogfId'},$id,$entry{'name'} --> invalid ref\n";
+			#print "$entry->{'ogf:id'},$id,$entry->{'name'} --> invalid ref\n";
+			$entry = {};
 			next;
 		}
-		$entry{'ref'} = uc $entry{'ref'};
-		if( exists $refs{$entry{'ref'}} )
+		$entry->{'ref'} = uc $entry->{'ref'};
+		if( exists $refs{$entry->{'ref'}} )
 		{
-			#print "$entry{'is_in:ogfId'},$id,$entry{'name'} --> duplicate ref: $entry{'ref'}\n";
+			#print "$entry->{'ogf:id'},$id,$entry->{'name'} --> duplicate ref: $entry->{'ref'}\n";
+			$entry = {};
 			next;
 		}
-		push @out, \%entry;
-		print "$entry{'is_in:ogfId'},$id,$entry{'name'},$entry{ref}\n";
-		$refs{$entry{'ref'}} = $entry{'ref'};
 	}
 	# is this an runway?
-	elsif( exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'runway' )
+	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'runway' )
 	{
+		if( $record->{tags}->{ref} =~ /^(0?[1-9]|[1-2]\d|3[0-6])[LCR]?(\/(0?[1-9]|[1-2]\d|3[0-6])[LCR]?)?$/ )
+		{
+			my $runway = {};
+			$runway->{'ref'}     = $record->{tags}->{ref};
+			$runway->{'width'}   = $record->{tags}->{width} || 45;
+			$runway->{'length'}  = $record->{tags}->{length} || '';
+			$runway->{'surface'} = $record->{tags}->{surface} || 'concrete';
+			
+			$entry->{'runways:count'}++;
+			push @{$entry->{'runways'}}, $runway;
+		}
+	}
+	# is this an gate?
+	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'gate' )
+	{
+		$entry->{'gates:count'}++;
+	}
+	# is this an terminal?
+	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'terminal' )
+	{
+		$entry->{'terminals:count'}++;
 	}
 	else
 	{
-		next;
 	}
+}
+
+# current airport entry to flush out?
+if( exists $entry->{'ogf:id'} )
+{
+	push @out, $entry;
+	print "$entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
+	$refs{$entry->{'ref'}} = $entry->{'ref'};
 }
 
 # create output file
@@ -224,6 +280,15 @@ sub parseRef($$)
 	my $ref = $var1 || $var2 || undef;
 	return $ref if( defined $ref and $ref =~ /^[A-Z]{3}$/ );
 	undef;
+}
+
+#-------------------------------------------------------------------------------
+sub parseStr($$$$)
+{
+	my($var1, $var2, $var3, $max) = @_;
+	my $ret = $var1 || $var2 || $var3;
+	$ret = substr $ret, 0, $max if( defined $ret and defined $max );
+	$ret;
 }
 
 #-------------------------------------------------------------------------------
