@@ -11,14 +11,14 @@ use OGF::Util::File;
 use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 
+sub addAirport($);
 sub parseRef($$);
 sub parseStr($$$$);
 sub parseContinent($$);
-sub parseSector($);
-sub parseScope($);
 sub parsePermission($);
+sub parseAerodromeType($);
 sub fileExport_Overpass($);
-sub housekeeping($$);
+sub housekeeping($$$);
 
 binmode(STDOUT, ":utf8");
 
@@ -39,8 +39,6 @@ my $OUTPUT_DIR  = $opt{'od'}     || '/tmp';
 my $PUBLISH_DIR = $opt{'copyto'} || '/tmp';
 my $OUTFILE_NAME = 'airports';
 my $QUERY;
-
-housekeeping $OUTPUT_DIR, time;
 
 if( ! $opt{'ds'} )
 {
@@ -95,6 +93,8 @@ else
 	die qq/Unknown dataset: "$opt{ds}"/;
 }
 
+housekeeping $OUTPUT_DIR, $OUTFILE_NAME, time;
+
 # an .json file can be specified as the last commandline argument, otherwise get from Overpass
 if( ! $jsonFile )
 {
@@ -112,6 +112,7 @@ if( open( my $fh, '<', $jsonFile ) )
 	eval { $results = $json->decode($file_content); 1; }
 }
 die qq/Cannot load JSON from Overpass/ if( !defined $results );
+die qq/Overpass runtime error: $results->{remark}/ if( $results->{remark} and $results->{remark} =~ /^runtime error/ );
 
 # load in the territories JSON
 print "loading territories...\n";
@@ -146,6 +147,7 @@ foreach my $territory ( @$territories )
 
 # for each item in the Overpass results
 my @out;
+my @errors;
 my %refs;
 my $records = $results->{elements};
 my %currentTerritory;
@@ -159,13 +161,7 @@ for my $record ( @$records )
 	if( exists $record->{tags}->{boundary} and $record->{tags}->{boundary} eq 'administrative' )
 	{
 		# current airport entry to flush out?
-		if( exists $entry->{'ogf:id'} )
-		{
-			push @out, $entry;
-			print "$entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
-			$refs{$entry->{'ref'}} = $entry->{'ref'};
-			$entry = {};
-		}
+		addAirport $entry; $entry = {};
 		
 		%currentTerritory = ();
 		
@@ -188,16 +184,12 @@ for my $record ( @$records )
 	elsif( exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'aerodrome' )
 	{
 		# current airport entry to flush out?
-		if( exists $entry->{'ogf:id'} )
-		{
-			push @out, $entry;
-			print "$entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
-			$refs{$entry->{'ref'}} = $entry->{'ref'};
-			$entry = {};
-		}
+		addAirport $entry; $entry = {};
+		
 		# valid territory?
 		next if( !exists $currentTerritory{'ogf:id'} );
 		
+		$entry->{'ref'}                = parseRef $record->{tags}->{ref}, $record->{tags}->{iata};
 		$entry->{'ogf:id'}             = $currentTerritory{'ogf:id'};
 		$entry->{'is_in:continent'}    = $currentTerritory{'is_in:continent'};
 		$entry->{'is_in:country'}      = $currentTerritory{'is_in:country'};
@@ -208,45 +200,14 @@ for my $record ( @$records )
 		$entry->{'serves'}             = parseStr $record->{tags}->{serves}, $record->{tags}->{'is_in:city'}, '', undef;
 		$entry->{'lat'}                = $record->{center}->{lat};
 		$entry->{'lon'}                = $record->{center}->{lon};
+		$entry->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || 'Question mark in square brackets.svg';
+		$entry->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
+		$entry->{'type'}               = parseAerodromeType $record->{tags}->{'aerodrome:type'};
 		$entry->{'runways'}            = ();
-		$entry->{'runways:count'}      = '';
-		$entry->{'gates:count'}        = '';
-		$entry->{'terminals:count'}    = '';
+		$entry->{'runways:count'}      = 0;
+		$entry->{'gates:count'}        = 0;
+		$entry->{'terminals:count'}    = 0;
 		$entry->{'terminals'}          = ();
-		
-		# parse the airport ref, and check unique
-		$entry->{'ref'} = parseRef $record->{tags}->{ref}, $record->{tags}->{iata};
-		if( !defined $entry->{'ref'} )
-		{
-			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> invalid ref\n";
-			$entry = {};
-			next;
-		}
-		$entry->{'ref'} = uc $entry->{'ref'};
-		if( exists $refs{$entry->{'ref'}} )
-		{
-			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> duplicate ref: $entry->{'ref'}\n";
-			$entry = {};
-			next;
-		}
-		
-		# don't include every type of aerodrome
-		my $aerodromeType = $record->{tags}->{'aerodrome:type'} || $record->{tags}->{aerodrome};
-		if( defined $aerodromeType and ($aerodromeType eq 'gliding' or
-		                                $aerodromeType eq 'private' or
-		                                $aerodromeType eq 'military') )
-		
-		{
-			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> skipping aerodrome:type=$aerodromeType\n";
-			$entry = {};
-			next;
-		}
-		elsif( defined $record->{tags}->{military} and $record->{tags}->{military} eq 'airfield' )
-		{
-			print "$entry->{'ogf:id'},$id,$entry->{'name'} --> skipping military=airfield\n";
-			$entry = {};
-			next;
-		}
 	}
 	# is this an runway?
 	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'runway' )
@@ -284,18 +245,69 @@ for my $record ( @$records )
 }
 
 # current airport entry to flush out?
-if( exists $entry->{'ogf:id'} )
-{
-	push @out, $entry;
-	print "$entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
-	$refs{$entry->{'ref'}} = $entry->{'ref'};
-}
+addAirport $entry; $entry = {};
 
-# create output file
+# create output files
 my $publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME . '.json';
 my $json = JSON::XS->new->canonical->indent(2)->space_after;
 my $text = $json->encode( \@out );
 OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
+$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME . '_errors.json';
+$json = JSON::XS->new->canonical->indent(2)->space_after;
+$text = $json->encode( \@errors );
+OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
+
+#-------------------------------------------------------------------------------
+sub addAirport($)
+{
+	my($entry) = @_;
+	if( defined $entry and exists $entry->{'ogf:id'} )
+	{
+		# check ref, and check unique
+		if( !defined $entry->{'ref'} )
+		{
+			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "invalid ref"};
+			return;
+		}
+		$entry->{'ref'} = uc $entry->{'ref'};
+		if( exists $refs{$entry->{'ref'}} )
+		{
+			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "duplicate ref: $entry->{'ref'}"};
+			return;
+		}
+		
+		# don't include every type of aerodrome
+		if( $entry->{'type'} ne 'international' and $entry->{type} ne 'regional' )
+		{
+			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping aerodrome:type=$entry->{'type'}"};
+			return;
+		}
+		if( defined $entry->{'military'} )
+		{
+			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping military=airfield"};
+			return;
+		}
+		
+		# ensure at least 1 runway
+		if( $entry->{'runways:count'} < 1 )
+		{
+			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "no runways found"};
+			return;
+		}
+		
+		# ensure at least 1 terminal
+		if( $entry->{'terminals:count'} < 1 )
+		{
+			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "no terminals found"};
+			return;
+		}
+		
+		push @out, $entry;
+		print "OUT: $entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
+		$refs{$entry->{'ref'}} = $entry->{'ref'};
+		$entry = {};
+	}
+}
 
 #-------------------------------------------------------------------------------
 sub parseRef($$)
@@ -336,6 +348,28 @@ sub parseContinent($$)
 }
 
 #-------------------------------------------------------------------------------
+sub parsePermission($)
+{
+	my($var1) = @_;
+	return $var1 if( $var1 and ($var1 eq 'yes' or $var1 eq 'no' or $var1 eq 'ask') );
+	return 'ask';
+}
+
+#-------------------------------------------------------------------------------
+sub parseAerodromeType($)
+{
+	my($at) = @_;
+	return 'regional' if( !defined $at );
+	if( $at eq 'international'   or $at eq 'regional' or $at eq 'public'  or
+	    $at eq 'gliding'         or $at eq 'airfield' or $at eq 'private' or
+	    $at eq 'military/public' or $at eq 'military' )
+	{
+		return $at;
+	}
+	return 'regional';
+}
+
+#-------------------------------------------------------------------------------
 sub fileExport_Overpass($)
 {
 	my($outFile) = @_;
@@ -345,16 +379,16 @@ sub fileExport_Overpass($)
 }
 
 #-------------------------------------------------------------------------------
-sub housekeeping($$)
+sub housekeeping($$$)
 {
-	my($dir, $now) = @_;
+	my($dir, $prefix, $now) = @_;
 	my $KEEP_FOR = 60 * 60 * 6 ; # 6 hours
 	my $dh;
 	
 	opendir $dh, $dir;
 	while( my $file = readdir $dh )
 	{
-		next unless( $file =~ /^airport_\d{14}\.json/ );
+		next unless( $file =~ /^${prefix}_\d{14}\.json/ );
 		if( $now - (stat "$dir/$file")[9] > $KEEP_FOR )
 		{
 			print "deleting: $dir/$file\n";
