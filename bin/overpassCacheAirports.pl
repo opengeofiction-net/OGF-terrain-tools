@@ -195,7 +195,7 @@ for my $record ( @$records )
 		$entry->{'is_in:country'}      = $currentTerritory{'is_in:country'};
 		$entry->{'is_in:country:wiki'} = $currentTerritory{'is_in:country:wiki'};
 		$entry->{'id'}                 = $id;
-		$entry->{'name'}               = $record->{tags}->{name};
+		$entry->{'name'}               = $record->{tags}{int_name} || $record->{tags}->{name};
 		$entry->{'description'}        = parseStr $record->{tags}->{description}, undef, '', 100;
 		$entry->{'serves'}             = parseStr $record->{tags}->{serves}, $record->{tags}->{'is_in:city'}, '', undef;
 		$entry->{'lat'}                = $record->{center}->{lat};
