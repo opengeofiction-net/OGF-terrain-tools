@@ -212,6 +212,9 @@ for my $record ( @$records )
 	# is this an runway?
 	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'runway' )
 	{
+		# exclude displaced thresholds
+		next if( exists $record->{tags}->{runway} and $record->{tags}->{runway} eq 'displaced_threshold' );
+
 		if( $record->{tags}->{ref} =~ /^(0?[1-9]|[1-2]\d|3[0-6])[LCR]?(\/(0?[1-9]|[1-2]\d|3[0-6])[LCR]?)?$/ )
 		{
 			my $runway = {};
