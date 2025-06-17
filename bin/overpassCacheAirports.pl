@@ -155,7 +155,7 @@ my $entry = {};
 print "parsing airports JSON...\n";
 for my $record ( @$records )
 {
-	my $id = substr($record->{type}, 0, 1) . $record->{id};
+	my $id = $record->{type} . '/' . $record->{id};
 	
 	# is this a territory?
 	if( exists $record->{tags}->{boundary} and $record->{tags}->{boundary} eq 'administrative' )
