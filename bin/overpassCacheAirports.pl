@@ -4,6 +4,7 @@ use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
 use strict;
 use warnings;
 use feature 'unicode_strings' ;
+use utf8;
 use Date::Format;
 use Encode;
 use JSON::XS;
@@ -232,7 +233,7 @@ for my $record ( @$records )
 			# add to textual summary
 			$entry->{'runway'} .= ', ' if( $entry->{'runway'} );
 			$entry->{'runway'} .= $runwayRef;
-			$entry->{'runway'} .= ' (' . $runway->{'length'} . 'm)' if( $runway->{'length'} );
+			$entry->{'runway'} .= "\x{00a0}(" . $runway->{'length'} . 'm)' if( $runway->{'length'} );
 
 			# save runway in the airport list
 			$entry->{'runways:count'}++;
