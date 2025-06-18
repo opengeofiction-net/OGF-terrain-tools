@@ -17,6 +17,7 @@ sub parseStr($$$$);
 sub parseContinent($$);
 sub parsePermission($);
 sub parseAerodromeType($);
+sub parseLength($);
 sub fileExport_Overpass($);
 sub housekeeping($$$);
 
@@ -203,6 +204,7 @@ for my $record ( @$records )
 		$entry->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || 'Question mark in square brackets.svg';
 		$entry->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
 		$entry->{'type'}               = parseAerodromeType $record->{tags}->{'aerodrome:type'};
+		$entry->{'runway'}             = '';
 		$entry->{'runways'}            = ();
 		$entry->{'runways:count'}      = 0;
 		$entry->{'gates:count'}        = 0;
@@ -215,14 +217,24 @@ for my $record ( @$records )
 		# exclude displaced thresholds
 		next if( exists $record->{tags}->{runway} and $record->{tags}->{runway} eq 'displaced_threshold' );
 
-		if( $record->{tags}->{ref} =~ /^(0?[1-9]|[1-2]\d|3[0-6])[LCR]?(\/(0?[1-9]|[1-2]\d|3[0-6])[LCR]?)?$/ )
+		# silently support dashes in refs, used in error instead of /
+		my $runwayRef = $record->{tags}->{ref};
+		$runwayRef =~ tr/-/\//;
+
+		if( $runwayRef =~ /^(0?[1-9]|[1-2]\d|3[0-6])[LCR]?(\/(0?[1-9]|[1-2]\d|3[0-6])[LCR]?)?$/ )
 		{
 			my $runway = {};
-			$runway->{'ref'}     = $record->{tags}->{ref};
-			$runway->{'width'}   = $record->{tags}->{width} || 45;
-			$runway->{'length'}  = $record->{tags}->{length} || '';
-			$runway->{'surface'} = $record->{tags}->{surface} || 'concrete';
+			$runway->{'runway:ref'} = $runwayRef;
+			$runway->{'width'}      = $record->{tags}->{width} || 45;
+			$runway->{'length'}     = parseLength $record->{tags}->{length};
+			$runway->{'surface'}    = $record->{tags}->{surface} || 'concrete';
 			
+			# add to textual summary
+			$entry->{'runway'} .= ', ' if( $entry->{'runway'} );
+			$entry->{'runway'} .= $runwayRef;
+			$entry->{'runway'} .= ' (' . $runway->{'length'} . 'm)' if( $runway->{'length'} );
+
+			# save runway in the airport list
 			$entry->{'runways:count'}++;
 			push @{$entry->{'runways'}}, $runway;
 		}
@@ -370,6 +382,14 @@ sub parseAerodromeType($)
 		return $at;
 	}
 	return 'regional';
+}
+
+#-------------------------------------------------------------------------------
+sub parseLength($)
+{
+	my($var) = @_;
+	return $var + 0 if( defined $var and $var =~ /^\d+$/ and $var >= 200 and $var <= 6000 );
+	return '';
 }
 
 #-------------------------------------------------------------------------------
