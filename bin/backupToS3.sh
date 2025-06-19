@@ -13,6 +13,7 @@ fi
 DIR=$1
 BUCKET=$2
 STORAGE=$3
+RATELIMIT="--limit-rate=20m"
 
 # setup working dir
 cd ${DIR}
@@ -25,6 +26,6 @@ do
 		store=STANDARD
 	fi
 	echo Backing up ${file} to ${BUCKET} using ${store}
-	s3cmd put --storage-class=${store} --no-progress --stats "${file}" ${BUCKET}
+	s3cmd put --storage-class=${store} --no-progress ${RATELIMIT} --stats "${file}" ${BUCKET}
 	unlink ${file}
 done
