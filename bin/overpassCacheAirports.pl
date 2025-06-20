@@ -293,7 +293,7 @@ sub addAirport($)
 		}
 		
 		# don't include every type of aerodrome
-		if( $entry->{'type'} ne 'international' and $entry->{type} ne 'regional' )
+		if( $entry->{'type'} ne 'global' and $entry->{'type'} ne 'international' and $entry->{type} ne 'regional' )
 		{
 			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping aerodrome:type=$entry->{'type'}"};
 			return;
@@ -376,9 +376,9 @@ sub parseAerodromeType($)
 {
 	my($at) = @_;
 	return 'regional' if( !defined $at );
-	if( $at eq 'international'   or $at eq 'regional' or $at eq 'public'  or
-	    $at eq 'gliding'         or $at eq 'airfield' or $at eq 'private' or
-	    $at eq 'military/public' or $at eq 'military' )
+	if( $at eq 'global ' or $at eq 'international'   or $at eq 'regional' or
+	    $at eq 'public'  or $at eq 'gliding'         or $at eq 'airfield' or
+	    $at eq 'private' or $at eq 'military/public' or $at eq 'military' )
 	{
 		return $at;
 	}
