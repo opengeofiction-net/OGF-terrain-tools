@@ -376,7 +376,7 @@ sub parseAerodromeType($)
 {
 	my($at) = @_;
 	return 'regional' if( !defined $at );
-	if( $at eq 'global ' or $at eq 'international'   or $at eq 'regional' or
+	if( $at eq 'global'  or $at eq 'international'   or $at eq 'regional' or
 	    $at eq 'public'  or $at eq 'gliding'         or $at eq 'airfield' or
 	    $at eq 'private' or $at eq 'military/public' or $at eq 'military' )
 	{
