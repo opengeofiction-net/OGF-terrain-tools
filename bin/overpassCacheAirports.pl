@@ -187,7 +187,7 @@ for my $record ( @$records )
 	
 			print "> parsing airports in $canonicalTerritories{$record->{tags}->{'ogf:id'}} $record->{tags}->{'ogf:id'}: $record->{tags}->{name}\n";
 		}
-		elsif( $record->{tags}->{'ogf:id'} eq $record->{tags}->{'name'} )
+		elsif( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} and $record->{tags}->{'ogf:id'} eq $record->{tags}->{'name'} )
 		{
 			print "> SKIPPING airports in $record->{tags}->{'ogf:id'}: territory name not set\n";
 		}
