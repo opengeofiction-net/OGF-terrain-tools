@@ -177,11 +177,15 @@ for my $record ( @$records )
 	{
 		# current airport entry to flush out?
 		addAirport $entry; $entry = {};
-		
 		%currentTerritory = ();
 		
+		# check valid ogf:id
+		if( !exists $record->{tags}->{'ogf:id'} )
+		{
+			print "> ERROR in $id\n";
+		}
 		# is the territory canonical?
-		if( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} and $record->{tags}->{'ogf:id'} ne $record->{tags}->{'name'} )
+		elsif( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} and $record->{tags}->{'ogf:id'} ne $record->{tags}->{'name'} )
 		{
 			$currentTerritory{'ogf:id'}             = $record->{'tags'}{'ogf:id'};
 			$currentTerritory{'is_in:country'}      = $record->{'tags'}{'int_name'} || $record->{'tags'}{'name'} || $record->{'tags'}{'ogf:id'};
