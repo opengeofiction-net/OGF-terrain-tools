@@ -138,14 +138,17 @@ foreach my $territory ( @$territories )
 {
 	my($ogfId, $status) = ($territory->{ogfId}, $territory->{status});
 	
-	# explicit non-canon?
-	if( exists $noncanon{$ogfId} )
+	if( $ogfId =~ /^BG/ )
 	{
-		# not canonical
+		# not canonical - beginner
 	}
-	elsif( $status =~ /^(available|reserved|beginner)$/ )
+	elsif( exists $noncanon{$ogfId} )
 	{
-		# not canonical - inactive, beginner
+		# explicitly not canonical
+	}
+	elsif( $status =~ /^(available|reserved)$/ )
+	{
+		# not canonical - inactive
 	}
 	elsif( $status =~ /^(owned|collaborative|archived|open to all|outline|marked for withdrawal)$/ )
 	{
