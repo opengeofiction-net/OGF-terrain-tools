@@ -37,6 +37,7 @@ my( $jsonFile ) = @ARGV;
 usageError() if $opt{'h'};
 
 my $URL_TERRITORIES = 'https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration?action=raw';
+my $URL_SETTINGS = 'https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration/settings?action=raw';
 my $OUTPUT_DIR  = $opt{'od'}     || '/tmp';
 my $PUBLISH_DIR = $opt{'copyto'} || '/tmp';
 my $OUTFILE_NAME = 'airports';
@@ -116,26 +117,34 @@ if( open( my $fh, '<', $jsonFile ) )
 die qq/Cannot load JSON from Overpass/ if( !defined $results );
 die qq/Overpass runtime error: $results->{remark}/ if( $results->{remark} and $results->{remark} =~ /^runtime error/ );
 
+# load JSON settings
+my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-overpassCacheAirports.pl/2025.06');
+my $resp = $userAgent->get($URL_SETTINGS);
+die qq/Cannot read $URL_SETTINGS/ unless( $resp->is_success );
+my $settings = JSON::XS->new->utf8->decode ($resp->content);
+
 # load in the territories JSON
 print "loading territories...\n";
-my $userAgent = LWP::UserAgent->new(keep_alive => 20, agent => 'OGF-overpassCacheAirports.pl/2025.06');
-my $resp = $userAgent->get($URL_TERRITORIES);
+$resp = $userAgent->get($URL_TERRITORIES);
 die qq/Cannot read $URL_TERRITORIES/ unless( $resp->is_success );
 my $territories = JSON::XS->new->utf8->decode ($resp->content);
 
 # build up a list of canonical territories
 print "selecting canonical territories...\n";
 my %canonicalTerritories;
+my %noncanon = map { $_ => 1 } @{$settings->{non_canon_free_to_edit}};
 foreach my $territory ( @$territories )
 {
 	my($ogfId, $status) = ($territory->{ogfId}, $territory->{status});
-	if( $ogfId =~ /^BG/ )
+	
+	# explicit non-canon?
+	if( exists $noncanon{$ogfId} )
 	{
-		# not canonical - beginner territory
+		# not canonical
 	}
-	elsif( $status =~ /^(available|reserved)$/ )
+	elsif( $status =~ /^(available|reserved|beginner)$/ )
 	{
-		# not canonical - inactive
+		# not canonical - inactive, beginner
 	}
 	elsif( $status =~ /^(owned|collaborative|archived|open to all|outline|marked for withdrawal)$/ )
 	{
