@@ -147,10 +147,6 @@ foreach my $territory ( @$territories )
 	{
 		# not canonical - inactive, beginner
 	}
-	elsif( $territory->{ogfId} eq $territory->{name} )
-	{
-		# not canonical - territory name not set
-	}
 	elsif( $status =~ /^(owned|collaborative|archived|open to all|outline|marked for withdrawal)$/ )
 	{
 		$canonicalTerritories{$ogfId} = $status;
@@ -182,7 +178,7 @@ for my $record ( @$records )
 		%currentTerritory = ();
 		
 		# is the territory canonical?
-		if( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} )
+		if( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} and $record->{tags}->{'ogf:id'} ne $record->{tags}->{'name'} )
 		{
 			$currentTerritory{'ogf:id'}             = $record->{'tags'}{'ogf:id'};
 			$currentTerritory{'is_in:country'}      = $record->{'tags'}{'int_name'} || $record->{'tags'}{'name'} || $record->{'tags'}{'ogf:id'};
@@ -190,6 +186,10 @@ for my $record ( @$records )
 			$currentTerritory{'is_in:continent'}    = parseContinent $record->{'tags'}{'is_in:continent'}, $record->{'tags'}{'ogf:id'};
 	
 			print "> parsing airports in $canonicalTerritories{$record->{tags}->{'ogf:id'}} $record->{tags}->{'ogf:id'}: $record->{tags}->{name}\n";
+		}
+		elsif( $record->{tags}->{'ogf:id'} eq $record->{tags}->{'name'} )
+		{
+			print "> SKIPPING airports in $record->{tags}->{'ogf:id'}: territory name not set\n";
 		}
 		else
 		{
