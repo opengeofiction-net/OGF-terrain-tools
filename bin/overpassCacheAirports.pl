@@ -102,6 +102,7 @@ housekeeping $OUTPUT_DIR, $OUTFILE_NAME, time;
 if( ! $jsonFile )
 {
 	$jsonFile = $OUTPUT_DIR . '/' . $OUTFILE_NAME . '_'. time2str('%Y%m%d%H%M%S', time) . '.json';
+	print "running Overpass query...\n";
 	fileExport_Overpass $jsonFile if( ! -f $jsonFile );
 }
 exit if( ! -f $jsonFile );
@@ -145,6 +146,10 @@ foreach my $territory ( @$territories )
 	elsif( $status =~ /^(available|reserved|beginner)$/ )
 	{
 		# not canonical - inactive, beginner
+	}
+	elsif( $territory->{ogfId} eq $territory->{name} )
+	{
+		# not canonical - territory name not set
 	}
 	elsif( $status =~ /^(owned|collaborative|archived|open to all|outline|marked for withdrawal)$/ )
 	{
