@@ -1,0 +1,11 @@
+[Unit]
+Description=Forces cache purge for wiki pages: %i
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+User=ogf
+Group=ogf
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/purgeWikiPages.pl -ds '%i'
+
+[Install]
+WantedBy=default.target
