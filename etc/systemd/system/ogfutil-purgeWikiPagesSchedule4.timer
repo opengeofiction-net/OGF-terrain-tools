@@ -1,0 +1,9 @@
+[Unit]
+Description=Forces cache purge for wiki pages: schedule 4
+
+[Timer]
+OnCalendar=00/4:35
+Unit=ogfutil-purgeWikiPages@schedule4.service
+
+[Install]
+WantedBy=timers.target
