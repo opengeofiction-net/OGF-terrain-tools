@@ -31,6 +31,8 @@ die qq/Cannot read $query/ unless( $resp->is_success );
 my $results = JSON::XS->new->utf8->decode ($resp->content);
 
 # start PHP page purge script
+# note: the script could have used mediawiki.org/wiki/API:Purge POST API call,
+# which would mean it could run on the util server, rather than wiki server
 open my $fh => "| $WIKI_PURGE " or die $!;
 
 # for each page in the category
