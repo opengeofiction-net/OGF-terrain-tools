@@ -275,11 +275,6 @@ for my $record ( @$records )
 			$entry->{'terminals:count'}++;
 			push @{$entry->{'terminals'}}, $name;
 		}
-		elsif( $entry->{'terminals:count'} == 0 )
-		{
-			# in the 1 terminal scenario, it's possible it is unnamed...
-			$entry->{'terminals:count'} = 1;
-		}
 	}
 	else
 	{
