@@ -88,6 +88,8 @@ foreach.territories->.territory(
     nwr(area.airport)[aeroway=terminal];
     out tags;
   );
+  nwr["headquarters"="main"]["economy:sector"="tertiary"]["economy:iclass"~"[Aa]irline"][ref];
+  out center;
 );
 ---EOF---
 }
