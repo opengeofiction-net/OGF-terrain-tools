@@ -22,7 +22,7 @@ sub parsePermission($);
 sub parseAerodromeType($);
 sub parseLength($);
 sub fileExport_Overpass($);
-sub housekeeping($$$);
+sub housekeeping($$$$);
 
 binmode(STDOUT, ":utf8");
 
@@ -103,7 +103,7 @@ else
 	die qq/Unknown dataset: "$opt{ds}"/;
 }
 
-housekeeping $OUTPUT_DIR, $OUTFILE_NAME_AIRPORTS, time;
+housekeeping $OUTPUT_DIR, $OUTFILE_NAME_AIRPORTS, $OUTFILE_NAME_AIRLINES, time;
 
 # an .json file can be specified as the last commandline argument, otherwise get from Overpass
 if( ! $jsonFile )
@@ -494,16 +494,16 @@ sub fileExport_Overpass($)
 }
 
 #-------------------------------------------------------------------------------
-sub housekeeping($$$)
+sub housekeeping($$$$)
 {
-	my($dir, $prefix, $now) = @_;
+	my($dir, $prefix1, $prefix2, $now) = @_;
 	my $KEEP_FOR = 60 * 60 * 6 ; # 6 hours
 	my $dh;
 	
 	opendir $dh, $dir;
 	while( my $file = readdir $dh )
 	{
-		next unless( $file =~ /^${prefix}_\d{14}\.json/ );
+		next unless( $file =~ /^${prefix1}_\d{14}\.json/ or $file =~ /^${prefix2}_\d{14}\.json/ );
 		if( $now - (stat "$dir/$file")[9] > $KEEP_FOR )
 		{
 			print "deleting: $dir/$file\n";
