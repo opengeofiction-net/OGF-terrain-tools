@@ -13,7 +13,9 @@ use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
 
 sub addAirport($);
-sub parseRef($$);
+sub addAirline($);
+sub parseAirportRef($$);
+sub parseAirlineRef($);
 sub parseStr($$$$);
 sub parseContinent($$);
 sub parsePermission($);
@@ -40,12 +42,12 @@ my $URL_TERRITORIES = 'https://wiki.opengeofiction.net/index.php/OpenGeofiction:
 my $URL_SETTINGS = 'https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration/settings?action=raw';
 my $OUTPUT_DIR  = $opt{'od'}     || '/tmp';
 my $PUBLISH_DIR = $opt{'copyto'} || '/tmp';
-my $OUTFILE_NAME = 'airports';
+my $OUTFILE_NAME_AIRPORTS = 'airports';
+my $OUTFILE_NAME_AIRLINES = 'airlines';
 my $QUERY;
 
 if( ! $opt{'ds'} )
 {
-	$OUTFILE_NAME = 'airports';
 	# query takes ~ 2s, returning ~ 0.1 MB; allow up to 20s, 2 MB
 	$QUERY = << '---EOF---';
 [timeout:300][maxsize:2000000][out:json];
@@ -64,12 +66,15 @@ foreach.territories->.territory(
     nwr(area.airport)[aeroway=terminal];
     out tags;
   );
+  nwr(area.territory)["headquarters"="main"]["economy:sector"="tertiary"]["economy:iclass"~"[Aa]irline"];
+  out tags center;
 );
 ---EOF---
 }
 elsif( $opt{'ds'} eq 'test' )
 {
-	$OUTFILE_NAME .= '_test';
+	$OUTFILE_NAME_AIRPORTS .= '_test';
+	$OUTFILE_NAME_AIRLINES .= '_test';
 	# query takes ~ 2s, returning ~ 0.1 MB; allow up to 20s, 2 MB
 	$QUERY = << '---EOF---';
 [timeout:20][maxsize:2000000][out:json];
@@ -88,8 +93,8 @@ foreach.territories->.territory(
     nwr(area.airport)[aeroway=terminal];
     out tags;
   );
-  nwr["headquarters"="main"]["economy:sector"="tertiary"]["economy:iclass"~"[Aa]irline"][ref];
-  out center;
+  nwr(area.territory)["headquarters"="main"]["economy:sector"="tertiary"]["economy:iclass"~"[Aa]irline"];
+  out tags center;
 );
 ---EOF---
 }
@@ -98,12 +103,12 @@ else
 	die qq/Unknown dataset: "$opt{ds}"/;
 }
 
-housekeeping $OUTPUT_DIR, $OUTFILE_NAME, time;
+housekeeping $OUTPUT_DIR, $OUTFILE_NAME_AIRPORTS, time;
 
 # an .json file can be specified as the last commandline argument, otherwise get from Overpass
 if( ! $jsonFile )
 {
-	$jsonFile = $OUTPUT_DIR . '/' . $OUTFILE_NAME . '_'. time2str('%Y%m%d%H%M%S', time) . '.json';
+	$jsonFile = $OUTPUT_DIR . '/' . $OUTFILE_NAME_AIRPORTS . '_'. time2str('%Y%m%d%H%M%S', time) . '.json';
 	print "running Overpass query...\n";
 	fileExport_Overpass $jsonFile if( ! -f $jsonFile );
 }
@@ -163,9 +168,12 @@ foreach my $territory ( @$territories )
 }
 
 # for each item in the Overpass results
-my @out;
-my @errors;
-my %refs;
+my @airportOut;
+my @airportErrors;
+my %airportRefs;
+my @airlineOut;
+my @airlineErrors;
+my %airlineRefs;
 my $records = $results->{elements};
 my %currentTerritory;
 my $entry = {};
@@ -202,7 +210,7 @@ for my $record ( @$records )
 		}
 		else
 		{
-			print "> SKIPPING airports in non-canonical $record->{tags}->{'ogf:id'}: $record->{tags}->{name}\n";
+			print "> SKIPPING airports and airlines in non-canonical $record->{tags}->{'ogf:id'}: $record->{tags}->{name}\n";
 		}
 	}
 	# is this an airport?
@@ -214,7 +222,7 @@ for my $record ( @$records )
 		# valid territory?
 		next if( !exists $currentTerritory{'ogf:id'} );
 		
-		$entry->{'ref'}                = parseRef $record->{tags}->{ref}, $record->{tags}->{iata};
+		$entry->{'ref'}                = parseAirportRef $record->{tags}->{ref}, $record->{tags}->{iata};
 		$entry->{'ogf:id'}             = $currentTerritory{'ogf:id'};
 		$entry->{'is_in:continent'}    = $currentTerritory{'is_in:continent'};
 		$entry->{'is_in:country'}      = $currentTerritory{'is_in:country'};
@@ -278,6 +286,23 @@ for my $record ( @$records )
 			push @{$entry->{'terminals'}}, $name;
 		}
 	}
+	# an airline?
+	elsif( exists $record->{tags}->{'economy:iclass'} and $record->{tags}->{'economy:iclass'} =~ /[Aa]irline/ )
+	{
+		my $airline = {};
+		$airline->{'ref'}                = parseAirlineRef $record->{tags}->{ref};
+		$airline->{'name'}               = $record->{tags}{brand} || $record->{tags}->{name};
+		$airline->{'ogf:id'}             = $currentTerritory{'ogf:id'};
+		$airline->{'is_in:continent'}    = $currentTerritory{'is_in:continent'};
+		$airline->{'is_in:country'}      = $currentTerritory{'is_in:country'};
+		$airline->{'is_in:country:wiki'} = $currentTerritory{'is_in:country:wiki'};
+		$airline->{'id'}                 = $id;
+		$airline->{'lat'}                = $record->{lat} || $record->{center}->{lat};
+		$airline->{'lon'}                = $record->{lon} || $record->{center}->{lon};
+		$airline->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || 'Question mark in square brackets.svg';
+		$airline->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
+		addAirline $airline;
+	}
 	else
 	{
 	}
@@ -287,13 +312,21 @@ for my $record ( @$records )
 addAirport $entry; $entry = {};
 
 # create output files
-my $publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME . '.json';
+my $publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRPORTS . '.json';
 my $json = JSON::XS->new->canonical->indent(2)->space_after;
-my $text = $json->encode( \@out );
+my $text = $json->encode( \@airportOut );
 OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
-$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME . '_errors.json';
+$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRPORTS . '_errors.json';
 $json = JSON::XS->new->canonical->indent(2)->space_after;
-$text = $json->encode( \@errors );
+$text = $json->encode( \@airportErrors );
+OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
+$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRLINES . '.json';
+$json = JSON::XS->new->canonical->indent(2)->space_after;
+$text = $json->encode( \@airlineOut );
+OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
+$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRLINES . '_errors.json';
+$json = JSON::XS->new->canonical->indent(2)->space_after;
+$text = $json->encode( \@airlineErrors );
 OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
 
 #-------------------------------------------------------------------------------
@@ -305,55 +338,90 @@ sub addAirport($)
 		# check ref, and check unique
 		if( !defined $entry->{'ref'} )
 		{
-			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "invalid ref"};
+			push @airportErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "invalid ref"};
 			return;
 		}
 		$entry->{'ref'} = uc $entry->{'ref'};
-		if( exists $refs{$entry->{'ref'}} )
+		if( exists $airportRefs{$entry->{'ref'}} )
 		{
-			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "duplicate ref: $entry->{'ref'}"};
+			push @airportErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "duplicate ref: $entry->{'ref'}"};
 			return;
 		}
 		
 		# don't include every type of aerodrome
 		if( $entry->{'type'} ne 'global' and $entry->{'type'} ne 'international' and $entry->{type} ne 'regional' )
 		{
-			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping aerodrome:type=$entry->{'type'}"};
+			push @airportErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping aerodrome:type=$entry->{'type'}"};
 			return;
 		}
 		if( defined $entry->{'military'} )
 		{
-			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping military=airfield"};
+			push @airportErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "skipping military=airfield"};
 			return;
 		}
 		
 		# ensure at least 1 runway
 		if( $entry->{'runways:count'} < 1 )
 		{
-			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "no runways found"};
+			push @airportErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "no runways found"};
 			return;
 		}
 		
 		# ensure at least 1 terminal
 		if( $entry->{'terminals:count'} < 1 )
 		{
-			push @errors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "no terminals found"};
+			push @airportErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "no terminals found"};
 			return;
 		}
 		
-		push @out, $entry;
-		print "OUT: $entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
-		$refs{$entry->{'ref'}} = $entry->{'ref'};
+		push @airportOut, $entry;
+		print "OUT airport: $entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
+		$airportRefs{$entry->{'ref'}} = $entry->{'ref'};
 		$entry = {};
 	}
 }
 
 #-------------------------------------------------------------------------------
-sub parseRef($$)
+sub addAirline($)
+{
+	my($entry) = @_;
+	if( defined $entry and exists $entry->{'ogf:id'} )
+	{
+		# check ref, and check unique
+		if( !defined $entry->{'ref'} )
+		{
+			push @airlineErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "invalid ref"};
+			return;
+		}
+		$entry->{'ref'} = uc $entry->{'ref'};
+		if( exists $airlineRefs{$entry->{'ref'}} )
+		{
+			push @airlineErrors, {'ogf:id' => $entry->{'ogf:id'}, 'id' => $entry->{'id'}, 'name' => $entry->{'name'}, 'text' => "duplicate ref: $entry->{'ref'}"};
+			return;
+		}
+		
+		push @airlineOut, $entry;
+		print "OUT airline: $entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
+		$airlineRefs{$entry->{'ref'}} = $entry->{'ref'};
+		$entry = {};
+	}
+}
+
+#-------------------------------------------------------------------------------
+sub parseAirportRef($$)
 {
 	my($var1, $var2) = @_;
 	my $ref = $var1 || $var2 || undef;
 	return $ref if( defined $ref and $ref =~ /^[A-Z]{3}$/ );
+	undef;
+}
+
+#-------------------------------------------------------------------------------
+sub parseAirlineRef($)
+{
+	my($var1) = @_;
+	my $ref = $var1 || undef;
+	return $ref if( defined $ref and $ref =~ /^[A-Z0-9]{2}$/ );
 	undef;
 }
 
