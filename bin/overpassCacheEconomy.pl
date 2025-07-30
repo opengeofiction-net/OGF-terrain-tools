@@ -102,7 +102,7 @@ for my $record ( @$records )
 	$entry{'economy:type'} = $record->{tags}->{'economy:type'} || '';
 	$entry{'economy:scope'} = parseScope $record->{tags}->{'economy:scope'};
 	$entry{'headquarters'} = $record->{tags}->{'headquarters'} || '';
-	$entry{'ogf:logo'} = $record->{tags}->{'ogf:logo'} || 'Question mark in square brackets.svg';
+	$entry{'ogf:logo'} = $record->{tags}->{'ogf:logo'} || '';
 	$entry{'ogf:permission'} = parsePermission $record->{tags}->{'ogf:permission'};
 	$entry{'brand'} = $record->{tags}->{'brand'} || $entry{'name'};
 	
