@@ -291,11 +291,13 @@ for my $record ( @$records )
 	{
 		my $airline = {};
 		$airline->{'ref'}                = parseAirlineRef $record->{tags}->{ref};
-		$airline->{'name'}               = $record->{tags}{brand} || $record->{tags}->{name};
+		$airline->{'name'}               = $record->{tags}->{brand} || $record->{tags}->{name};
+		$airline->{'description'}        = parseStr $record->{tags}->{description}, undef, '', 100;
 		$airline->{'ogf:id'}             = $currentTerritory{'ogf:id'};
 		$airline->{'is_in:continent'}    = $currentTerritory{'is_in:continent'};
 		$airline->{'is_in:country'}      = $currentTerritory{'is_in:country'};
 		$airline->{'is_in:country:wiki'} = $currentTerritory{'is_in:country:wiki'};
+		$airline->{'is_in:city'}         = $record->{tags}->{'is_in:city'} || 'unknown';
 		$airline->{'id'}                 = $id;
 		$airline->{'lat'}                = $record->{lat} || $record->{center}->{lat};
 		$airline->{'lon'}                = $record->{lon} || $record->{center}->{lon};
