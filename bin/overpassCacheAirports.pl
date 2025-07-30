@@ -233,7 +233,7 @@ for my $record ( @$records )
 		$entry->{'serves'}             = parseStr $record->{tags}->{serves}, $record->{tags}->{'is_in:city'}, '', undef;
 		$entry->{'lat'}                = $record->{center}->{lat};
 		$entry->{'lon'}                = $record->{center}->{lon};
-		$entry->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || 'Question mark in square brackets.svg';
+		$entry->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || '';
 		$entry->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
 		$entry->{'type'}               = parseAerodromeType $record->{tags}->{'aerodrome:type'};
 		$entry->{'runway'}             = '';
@@ -301,7 +301,7 @@ for my $record ( @$records )
 		$airline->{'id'}                 = $id;
 		$airline->{'lat'}                = $record->{lat} || $record->{center}->{lat};
 		$airline->{'lon'}                = $record->{lon} || $record->{center}->{lon};
-		$airline->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || 'Question mark in square brackets.svg';
+		$airline->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || '';
 		$airline->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
 		addAirline $airline;
 	}
