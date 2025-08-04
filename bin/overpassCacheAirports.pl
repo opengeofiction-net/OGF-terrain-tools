@@ -78,7 +78,7 @@ elsif( $opt{'ds'} eq 'test' )
 	# query takes ~ 2s, returning ~ 0.1 MB; allow up to 20s, 2 MB
 	$QUERY = << '---EOF---';
 [timeout:20][maxsize:2000000][out:json];
-area[type=boundary][boundary=administrative][admin_level=2]["ogf:id"~"^(BG01|AR120|UL05[ab])$"]->.territories;
+area[type=boundary][boundary=administrative][admin_level=2]["ogf:id"~"^(BG01|AR120|UL04k|UL05[ab])$"]->.territories;
 foreach.territories->.territory(
   .territory out tags;
   wr[aeroway=aerodrome][name](area.territory)->.airports;
@@ -287,7 +287,8 @@ for my $record ( @$records )
 		}
 	}
 	# an airline?
-	elsif( exists $record->{tags}->{'economy:iclass'} and $record->{tags}->{'economy:iclass'} =~ /[Aa]irline/ )
+	elsif( exists $record->{tags}->{'economy:iclass'} and $record->{tags}->{'economy:iclass'} =~ /[Aa]irline/ and
+	       exists $currentTerritory{'ogf:id'} )
 	{
 		my $airline = {};
 		$airline->{'ref'}                = parseAirlineRef $record->{tags}->{ref};
