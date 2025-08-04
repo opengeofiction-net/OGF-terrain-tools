@@ -176,6 +176,7 @@ my @airlineErrors;
 my %airlineRefs;
 my $records = $results->{elements};
 my %currentTerritory;
+my %seenTerritories;
 my $entry = {};
 print "parsing airports JSON...\n";
 for my $record ( @$records )
@@ -193,24 +194,34 @@ for my $record ( @$records )
 		if( !exists $record->{tags}->{'ogf:id'} )
 		{
 			print "> ERROR in $id\n";
+			next;
 		}
+		my $ogfId = $record->{'tags'}{'ogf:id'};
+		
+		# check for duplicate ogf:id
+		if( exists $seenTerritories{$ogfId} )
+		{
+			print "> DUPLICATE ogf:id $ogfId: $seenTerritories{$ogfId} vs $id\n"
+		}
+		$seenTerritories{$ogfId} = $id;
+		
 		# is the territory canonical?
-		elsif( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} and $record->{tags}->{'ogf:id'} ne $record->{tags}->{'name'} )
+		if( exists $canonicalTerritories{$ogfId} and $ogfId ne $record->{tags}->{'name'} )
 		{
-			$currentTerritory{'ogf:id'}             = $record->{'tags'}{'ogf:id'};
-			$currentTerritory{'is_in:country'}      = $record->{'tags'}{'int_name'} || $record->{'tags'}{'name'} || $record->{'tags'}{'ogf:id'};
+			$currentTerritory{'ogf:id'}             = $ogfId;
+			$currentTerritory{'is_in:country'}      = $record->{'tags'}{'int_name'} || $record->{'tags'}{'name'} || $ogfId;
 			$currentTerritory{'is_in:country:wiki'} = $record->{'tags'}{'ogf:wiki'} || $record->{'tags'}{'ogfwiki'} || $currentTerritory{'is_in:country'};
-			$currentTerritory{'is_in:continent'}    = parseContinent $record->{'tags'}{'is_in:continent'}, $record->{'tags'}{'ogf:id'};
+			$currentTerritory{'is_in:continent'}    = parseContinent $record->{'tags'}{'is_in:continent'}, $ogfId;
 	
-			print "> parsing airports in $canonicalTerritories{$record->{tags}->{'ogf:id'}} $record->{tags}->{'ogf:id'}: $record->{tags}->{name}\n";
+			print "> parsing airports in $canonicalTerritories{$ogfId} $ogfId: $record->{tags}->{name}\n";
 		}
-		elsif( exists $canonicalTerritories{$record->{tags}->{'ogf:id'}} and $record->{tags}->{'ogf:id'} eq $record->{tags}->{'name'} )
+		elsif( exists $canonicalTerritories{$ogfId} and $ogfId eq $record->{tags}->{'name'} )
 		{
-			print "> SKIPPING airports in $record->{tags}->{'ogf:id'}: territory name not set\n";
+			print "> SKIPPING airports in $ogfId: territory name not set\n";
 		}
 		else
 		{
-			print "> SKIPPING airports and airlines in non-canonical $record->{tags}->{'ogf:id'}: $record->{tags}->{name}\n";
+			print "> SKIPPING airports and airlines in non-canonical $ogfId: $record->{tags}->{name}\n";
 		}
 	}
 	# is this an airport?
