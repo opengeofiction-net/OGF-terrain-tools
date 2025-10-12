@@ -893,15 +893,6 @@ sub buildAirlineRoutes()
 		};
 	}
 
-	# build final output structure
-	my @airlines = map { $airlineRouteData{$_} } sort keys %airlineRouteData;
-
-	push @airlineRoutesOut, {
-		'airlines' => \@airlines,
-		'metadata' => {
-			'generated' => time2str('%Y-%m-%dT%H:%M:%SZ', time),
-			'total_airlines' => scalar @airlines,
-			'total_routes' => $totalRoutes
-		}
-	};
+	# build final output structure - simple array of airline objects
+	@airlineRoutesOut = map { $airlineRouteData{$_} } sort keys %airlineRouteData;
 }
