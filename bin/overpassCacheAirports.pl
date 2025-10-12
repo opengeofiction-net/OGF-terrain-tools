@@ -8,6 +8,7 @@ use utf8;
 use Date::Format;
 use Encode;
 use JSON::XS;
+use Math::Trig;
 use OGF::Util::File;
 use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );
@@ -23,6 +24,12 @@ sub parseAerodromeType($);
 sub parseLength($);
 sub fileExport_Overpass($);
 sub housekeeping($$$$);
+sub haversine_distance($$$$);
+sub interpolate_great_circle($$$$$);
+sub parseDestinationTags($);
+sub validateAndBuildRoutes();
+sub buildAirportRoutes();
+sub buildAirlineRoutes();
 
 binmode(STDOUT, ":utf8");
 
@@ -44,6 +51,7 @@ my $OUTPUT_DIR  = $opt{'od'}     || '/tmp';
 my $PUBLISH_DIR = $opt{'copyto'} || '/tmp';
 my $OUTFILE_NAME_AIRPORTS = 'airports';
 my $OUTFILE_NAME_AIRLINES = 'airlines';
+my $OUTFILE_NAME_AIRLINE_ROUTES = 'airline_routes';
 my $QUERY;
 
 if( ! $opt{'ds'} )
@@ -75,6 +83,7 @@ elsif( $opt{'ds'} eq 'test' )
 {
 	$OUTFILE_NAME_AIRPORTS .= '_test';
 	$OUTFILE_NAME_AIRLINES .= '_test';
+	$OUTFILE_NAME_AIRLINE_ROUTES .= '_test';
 	# query takes ~ 2s, returning ~ 0.1 MB; allow up to 20s, 2 MB
 	$QUERY = << '---EOF---';
 [timeout:20][maxsize:2000000][out:json];
@@ -174,6 +183,10 @@ my %airportRefs;
 my @airlineOut;
 my @airlineErrors;
 my %airlineRefs;
+my %airportData;  # stores full airport data by code for route processing
+my %rawRoutes;    # stores raw route data: $rawRoutes{$airportCode}{$airlineCode} = [@destinationCodes]
+my @airlineRoutesOut;
+my @airlineRoutesErrors;
 my $records = $results->{elements};
 my %currentTerritory;
 my %seenTerritories;
@@ -253,6 +266,7 @@ for my $record ( @$records )
 		$entry->{'gates:count'}        = 0;
 		$entry->{'terminals:count'}    = 0;
 		$entry->{'terminals'}          = ();
+		$entry->{'destinations'}       = parseDestinationTags $record->{tags};
 	}
 	# is this an runway?
 	elsif( exists $entry->{'ogf:id'} and exists $record->{tags}->{aeroway} and $record->{tags}->{aeroway} eq 'runway' )
@@ -325,6 +339,18 @@ for my $record ( @$records )
 # current airport entry to flush out?
 addAirport $entry; $entry = {};
 
+# process routes - validate reciprocal tagging and build route structures
+print "validating routes and building route data...\n";
+validateAndBuildRoutes();
+buildAirportRoutes();
+buildAirlineRoutes();
+
+# remove raw destinations data from airport output (it's redundant and may contain invalid routes)
+foreach my $airport (@airportOut)
+{
+	delete $airport->{'destinations'};
+}
+
 # create output files
 my $publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRPORTS . '.json';
 my $json = JSON::XS->new->canonical->indent(2)->space_after;
@@ -341,6 +367,14 @@ OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
 $publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRLINES . '_errors.json';
 $json = JSON::XS->new->canonical->indent(2)->space_after;
 $text = $json->encode( \@airlineErrors );
+OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
+$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRLINE_ROUTES . '.json';
+$json = JSON::XS->new->canonical->indent(2)->space_after;
+$text = $json->encode( \@airlineRoutesOut );
+OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
+$publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRLINE_ROUTES . '_errors.json';
+$json = JSON::XS->new->canonical->indent(2)->space_after;
+$text = $json->encode( \@airlineRoutesErrors );
 OGF::Util::File::writeToFile($publishFile, $text, '>:encoding(UTF-8)' );
 
 #-------------------------------------------------------------------------------
@@ -391,6 +425,10 @@ sub addAirport($)
 		push @airportOut, $entry;
 		print "OUT airport: $entry->{'ogf:id'},$entry->{id},$entry->{name},$entry->{ref}\n";
 		$airportRefs{$entry->{'ref'}} = $entry->{'ref'};
+
+		# Store airport data for route processing
+		$airportData{$entry->{'ref'}} = $entry;
+
 		$entry = {};
 	}
 }
@@ -513,7 +551,7 @@ sub housekeeping($$$$)
 	my($dir, $prefix1, $prefix2, $now) = @_;
 	my $KEEP_FOR = 60 * 60 * 6 ; # 6 hours
 	my $dh;
-	
+
 	opendir $dh, $dir;
 	while( my $file = readdir $dh )
 	{
@@ -525,4 +563,345 @@ sub housekeeping($$$$)
 		}
 	}
 	closedir $dh;
+}
+
+#-------------------------------------------------------------------------------
+# great circle calculation functions (adapted from greatcircle.pl)
+#-------------------------------------------------------------------------------
+sub haversine_distance($$$$)
+{
+	my ($lat1, $lon1, $lat2, $lon2) = @_;
+	my $R = 6371; # Earth radius in km
+
+	my $dlat = deg2rad($lat2 - $lat1);
+	my $dlon = deg2rad($lon2 - $lon1);
+
+	$lat1 = deg2rad($lat1);
+	$lat2 = deg2rad($lat2);
+
+	my $a = sin($dlat/2)**2 + cos($lat1) * cos($lat2) * sin($dlon/2)**2;
+	my $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+	return $R * $c;
+}
+
+#-------------------------------------------------------------------------------
+sub interpolate_great_circle($$$$$)
+{
+	my ($lat1, $lon1, $lat2, $lon2, $interval_km) = @_;
+
+	my $distance = haversine_distance($lat1, $lon1, $lat2, $lon2);
+	return () if $distance == 0;
+
+	my $num_points = int($distance / $interval_km);
+	$num_points = 5 if $num_points < 5;  # minimum 5 points
+
+	my @points;
+	$lat1 = deg2rad($lat1);
+	$lon1 = deg2rad($lon1);
+	$lat2 = deg2rad($lat2);
+	$lon2 = deg2rad($lon2);
+
+	my $d_rad = $distance / 6371;
+	my $sin_d = sin($d_rad);
+
+	for my $i (0 .. $num_points) {
+		my $f = $i / $num_points;
+
+		my $A = sin((1 - $f) * $d_rad) / $sin_d;
+		my $B = sin($f * $d_rad) / $sin_d;
+
+		my $x = $A * cos($lat1) * cos($lon1) + $B * cos($lat2) * cos($lon2);
+		my $y = $A * cos($lat1) * sin($lon1) + $B * cos($lat2) * sin($lon2);
+		my $z = $A * sin($lat1) + $B * sin($lat2);
+
+		my $lat = atan2($z, sqrt($x**2 + $y**2));
+		my $lon = atan2($y, $x);
+
+		push @points, [rad2deg($lon), rad2deg($lat)];  # [lon, lat] for GeoJSON
+	}
+
+	return @points;
+}
+
+#-------------------------------------------------------------------------------
+# parse destination:XX tags from airport tags
+#-------------------------------------------------------------------------------
+sub parseDestinationTags($)
+{
+	my($tags) = @_;
+	my %destinations;
+
+	return \%destinations if !defined $tags;
+
+	# find all destination:XX tags
+	foreach my $key (keys %$tags)
+	{
+		if( $key =~ /^destination:([A-Z0-9]{2})$/ )
+		{
+			my $airlineCode = uc $1;
+			my $destList = $tags->{$key};
+
+			# split by semicolon and clean up
+			my @dests = split /;/, $destList;
+			@dests = map { uc $_ } @dests;  # uppercase
+			@dests = map { s/^\s+|\s+$//gr } @dests;  # trim whitespace
+			@dests = grep { /^[A-Z]{3}$/ } @dests;  # only valid 3-letter codes
+
+			$destinations{$airlineCode} = \@dests if @dests;
+		}
+	}
+
+	return \%destinations;
+}
+
+#-------------------------------------------------------------------------------
+# validate routes and check for reciprocal tagging
+#-------------------------------------------------------------------------------
+sub validateAndBuildRoutes()
+{
+	print "> validating reciprocal routes...\n";
+
+	# build validated routes hash
+	my %validatedRoutes;  # $validatedRoutes{$airlineCode}{$originCode}{$destCode} = 1
+
+	# for each airport, check its destinations
+	foreach my $originCode (keys %airportData)
+	{
+		my $airport = $airportData{$originCode};
+		my $destinations = $airport->{'destinations'};
+
+		foreach my $airlineCode (keys %$destinations)
+		{
+			foreach my $destCode (@{$destinations->{$airlineCode}})
+			{
+				# check if destination airport exists
+				if (!exists $airportData{$destCode})
+				{
+					push @airlineRoutesErrors, {
+						'origin' => $originCode,
+						'destination' => $destCode,
+						'airline' => $airlineCode,
+						'text' => "destination airport $destCode not found in canonical airports"
+					};
+					next;
+				}
+
+				# check if destination has reciprocal tag
+				my $destAirport = $airportData{$destCode};
+				my $destDestinations = $destAirport->{'destinations'};
+
+				if (!exists $destDestinations->{$airlineCode})
+				{
+					push @airlineRoutesErrors, {
+						'origin' => $originCode,
+						'destination' => $destCode,
+						'airline' => $airlineCode,
+						'text' => "missing reciprocal: $destCode does not list $airlineCode routes"
+					};
+					next;
+				}
+
+				# check if destination lists origin in its routes
+				my @destRoutes = @{$destDestinations->{$airlineCode}};
+				if (!grep { $_ eq $originCode } @destRoutes)
+				{
+					push @airlineRoutesErrors, {
+						'origin' => $originCode,
+						'destination' => $destCode,
+						'airline' => $airlineCode,
+						'text' => "missing reciprocal: $destCode does not list $originCode in destination:$airlineCode"
+					};
+					next;
+				}
+
+				# valid reciprocal route found
+				$validatedRoutes{$airlineCode}{$originCode}{$destCode} = 1;
+				print "  valid route: $airlineCode $originCode -> $destCode\n";
+			}
+		}
+	}
+
+	# store validated routes in global hash for other functions
+	%rawRoutes = %validatedRoutes;
+}
+
+#-------------------------------------------------------------------------------
+# build enhanced airport routes structure
+#-------------------------------------------------------------------------------
+sub buildAirportRoutes()
+{
+	print "> building airport routes...\n";
+
+	# for each airport in output, add routes structure
+	foreach my $airport (@airportOut)
+	{
+		my $airportCode = $airport->{'ref'};
+		my %routesByAirline;
+		my $totalRoutes = 0;
+
+		# find all airlines serving this airport
+		foreach my $airlineCode (keys %rawRoutes)
+		{
+			next if !exists $rawRoutes{$airlineCode}{$airportCode};
+
+			my @destinations;
+			foreach my $destCode (keys %{$rawRoutes{$airlineCode}{$airportCode}})
+			{
+				my $destAirport = $airportData{$destCode};
+				push @destinations, {
+					'airport_code' => $destCode,
+					'airport_name' => $destAirport->{'name'},
+					'city' => $destAirport->{'serves'},
+					'country' => $destAirport->{'is_in:country'},
+					'ogf:id' => $destAirport->{'ogf:id'},
+					'lat' => $destAirport->{'lat'},
+					'lon' => $destAirport->{'lon'}
+				};
+				$totalRoutes++;
+			}
+
+			# sort destinations by airport code
+			@destinations = sort { $a->{'airport_code'} cmp $b->{'airport_code'} } @destinations;
+
+			# find airline name
+			my $airlineName = $airlineCode;
+			foreach my $airline (@airlineOut)
+			{
+				if ($airline->{'ref'} eq $airlineCode)
+				{
+					$airlineName = $airline->{'name'};
+					last;
+				}
+			}
+
+			push @{$routesByAirline{'airlines'}}, {
+				'airline_code' => $airlineCode,
+				'airline_name' => $airlineName,
+				'destinations' => \@destinations
+			};
+		}
+
+		# sort airlines by code
+		if (exists $routesByAirline{'airlines'})
+		{
+			@{$routesByAirline{'airlines'}} = sort { $a->{'airline_code'} cmp $b->{'airline_code'} } @{$routesByAirline{'airlines'}};
+			$routesByAirline{'total_routes'} = $totalRoutes;
+			$routesByAirline{'total_airlines'} = scalar @{$routesByAirline{'airlines'}};
+
+			$airport->{'routes'} = \%routesByAirline;
+		}
+	}
+}
+
+#-------------------------------------------------------------------------------
+# build airline routes JSON with great circle geometry
+#-------------------------------------------------------------------------------
+sub buildAirlineRoutes()
+{
+	print "> building airline routes with geometry...\n";
+
+	my %airlineRouteData;
+	my $totalRoutes = 0;
+
+	# group routes by airline
+	foreach my $airlineCode (keys %rawRoutes)
+	{
+		my @routes;
+
+		# get all origin airports for this airline
+		foreach my $originCode (keys %{$rawRoutes{$airlineCode}})
+		{
+			my $originAirport = $airportData{$originCode};
+
+			# get all destinations from this origin
+			foreach my $destCode (keys %{$rawRoutes{$airlineCode}{$originCode}})
+			{
+				my $destAirport = $airportData{$destCode};
+
+				# calculate great circle distance
+				my $distance = haversine_distance(
+					$originAirport->{'lat'}, $originAirport->{'lon'},
+					$destAirport->{'lat'}, $destAirport->{'lon'}
+				);
+
+				# generate great circle geometry (point every ~500km)
+				my @geometry = interpolate_great_circle(
+					$originAirport->{'lat'}, $originAirport->{'lon'},
+					$destAirport->{'lat'}, $destAirport->{'lon'},
+					500
+				);
+
+				# build route structure
+				push @routes, {
+					'origin' => {
+						'airport_code' => $originCode,
+						'airport_name' => $originAirport->{'name'},
+						'city' => $originAirport->{'serves'},
+						'country' => $originAirport->{'is_in:country'},
+						'ogf:id' => $originAirport->{'ogf:id'},
+						'lat' => $originAirport->{'lat'},
+						'lon' => $originAirport->{'lon'}
+					},
+					'destination' => {
+						'airport_code' => $destCode,
+						'airport_name' => $destAirport->{'name'},
+						'city' => $destAirport->{'serves'},
+						'country' => $destAirport->{'is_in:country'},
+						'ogf:id' => $destAirport->{'ogf:id'},
+						'lat' => $destAirport->{'lat'},
+						'lon' => $destAirport->{'lon'}
+					},
+					'distance_km' => int($distance + 0.5),
+					'geometry' => {
+						'type' => 'LineString',
+						'coordinates' => \@geometry
+					}
+				};
+				$totalRoutes++;
+			}
+		}
+
+		# sort routes by origin then destination
+		@routes = sort {
+			$a->{'origin'}{'airport_code'} cmp $b->{'origin'}{'airport_code'} ||
+			$a->{'destination'}{'airport_code'} cmp $b->{'destination'}{'airport_code'}
+		} @routes;
+
+		# find airline details
+		my $airlineName = $airlineCode;
+		my $airlineOgfId = '';
+		my $airlineCountry = '';
+		foreach my $airline (@airlineOut)
+		{
+			if ($airline->{'ref'} eq $airlineCode)
+			{
+				$airlineName = $airline->{'name'};
+				$airlineOgfId = $airline->{'ogf:id'};
+				$airlineCountry = $airline->{'is_in:country'};
+				last;
+			}
+		}
+
+		$airlineRouteData{$airlineCode} = {
+			'airline_code' => $airlineCode,
+			'airline_name' => $airlineName,
+			'ogf:id' => $airlineOgfId,
+			'is_in:country' => $airlineCountry,
+			'routes' => \@routes,
+			'total_routes' => scalar @routes
+		};
+	}
+
+	# build final output structure
+	my @airlines = map { $airlineRouteData{$_} } sort keys %airlineRouteData;
+
+	push @airlineRoutesOut, {
+		'airlines' => \@airlines,
+		'metadata' => {
+			'generated' => time2str('%Y-%m-%dT%H:%M:%SZ', time),
+			'total_airlines' => scalar @airlines,
+			'total_routes' => $totalRoutes
+		}
+	};
 }
