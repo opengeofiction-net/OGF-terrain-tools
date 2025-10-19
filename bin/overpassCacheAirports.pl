@@ -28,7 +28,7 @@ sub haversine_distance($$$$);
 sub interpolate_great_circle($$$$$);
 sub parseDestinationTags($);
 sub validateAndBuildRoutes();
-sub buildAirportRoutes();
+sub buildAirportRoutesSummary();
 sub buildAirlineRoutes();
 
 binmode(STDOUT, ":utf8");
@@ -342,14 +342,8 @@ addAirport $entry; $entry = {};
 # process routes - validate reciprocal tagging and build route structures
 print "validating routes and building route data...\n";
 validateAndBuildRoutes();
-buildAirportRoutes();
+buildAirportRoutesSummary();
 buildAirlineRoutes();
-
-# remove raw destinations data from airport output (it's redundant and may contain invalid routes)
-foreach my $airport (@airportOut)
-{
-	delete $airport->{'destinations'};
-}
 
 # create output files
 my $publishFile = $PUBLISH_DIR . '/' . $OUTFILE_NAME_AIRPORTS . '.json';
@@ -727,69 +721,36 @@ sub validateAndBuildRoutes()
 }
 
 #-------------------------------------------------------------------------------
-# build enhanced airport routes structure
+# build simple airport routes summary - just list of destination codes
 #-------------------------------------------------------------------------------
-sub buildAirportRoutes()
+sub buildAirportRoutesSummary()
 {
-	print "> building airport routes...\n";
+	print "> building airport routes summary...\n";
 
-	# for each airport in output, add routes structure
+	# for each airport in output, add simple list of validated destinations
 	foreach my $airport (@airportOut)
 	{
 		my $airportCode = $airport->{'ref'};
-		my %routesByAirline;
-		my $totalRoutes = 0;
+		my %allDestinations;
 
-		# find all airlines serving this airport
+		# collect all unique destination codes from all airlines
 		foreach my $airlineCode (keys %rawRoutes)
 		{
 			next if !exists $rawRoutes{$airlineCode}{$airportCode};
 
-			my @destinations;
 			foreach my $destCode (keys %{$rawRoutes{$airlineCode}{$airportCode}})
 			{
-				my $destAirport = $airportData{$destCode};
-				push @destinations, {
-					'airport_code' => $destCode,
-					'airport_name' => $destAirport->{'name'},
-					'city' => $destAirport->{'serves'},
-					'country' => $destAirport->{'is_in:country'},
-					'ogf:id' => $destAirport->{'ogf:id'},
-					'lat' => $destAirport->{'lat'},
-					'lon' => $destAirport->{'lon'}
-				};
-				$totalRoutes++;
+				$allDestinations{$destCode} = 1;
 			}
-
-			# sort destinations by airport code
-			@destinations = sort { $a->{'airport_code'} cmp $b->{'airport_code'} } @destinations;
-
-			# find airline name
-			my $airlineName = $airlineCode;
-			foreach my $airline (@airlineOut)
-			{
-				if ($airline->{'ref'} eq $airlineCode)
-				{
-					$airlineName = $airline->{'name'};
-					last;
-				}
-			}
-
-			push @{$routesByAirline{'airlines'}}, {
-				'airline_code' => $airlineCode,
-				'airline_name' => $airlineName,
-				'destinations' => \@destinations
-			};
 		}
 
-		# sort airlines by code
-		if (exists $routesByAirline{'airlines'})
-		{
-			@{$routesByAirline{'airlines'}} = sort { $a->{'airline_code'} cmp $b->{'airline_code'} } @{$routesByAirline{'airlines'}};
-			$routesByAirline{'total_routes'} = $totalRoutes;
-			$routesByAirline{'total_airlines'} = scalar @{$routesByAirline{'airlines'}};
+		# convert to sorted array of airport codes
+		my @destinationList = sort keys %allDestinations;
 
-			$airport->{'routes'} = \%routesByAirline;
+		# add to airport record - only if there are routes
+		if (@destinationList)
+		{
+			$airport->{'destinations'} = \@destinationList;
 		}
 	}
 }
