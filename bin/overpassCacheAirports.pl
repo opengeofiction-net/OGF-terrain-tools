@@ -740,6 +740,9 @@ sub buildAirportRoutesSummary()
 
 			foreach my $destCode (keys %{$rawRoutes{$airlineCode}{$airportCode}})
 			{
+				# skip self-routes
+				next if $destCode eq $airportCode;
+
 				$allDestinations{$destCode} = 1;
 			}
 		}
@@ -789,6 +792,9 @@ sub buildAirlineRoutes()
 			# get all destinations from this origin
 			foreach my $destCode (keys %{$rawRoutes{$airlineCode}{$originCode}})
 			{
+				# skip routes where origin and destination are the same
+				next if $originCode eq $destCode;
+
 				my $destAirport = $airportData{$destCode};
 
 				# calculate great circle distance
