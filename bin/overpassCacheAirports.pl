@@ -757,18 +757,29 @@ sub buildAirportRoutesSummary()
 
 #-------------------------------------------------------------------------------
 # build airline routes JSON with great circle geometry
+# outputs a FLAT array of route objects for easy MediaWiki consumption
 #-------------------------------------------------------------------------------
 sub buildAirlineRoutes()
 {
 	print "> building airline routes with geometry...\n";
 
-	my %airlineRouteData;
-	my $totalRoutes = 0;
-
-	# group routes by airline
+	# build flat array of route objects
 	foreach my $airlineCode (keys %rawRoutes)
 	{
-		my @routes;
+		# find airline details
+		my $airlineName = $airlineCode;
+		my $airlineOgfId = '';
+		my $airlineCountry = '';
+		foreach my $airline (@airlineOut)
+		{
+			if ($airline->{'ref'} eq $airlineCode)
+			{
+				$airlineName = $airline->{'name'};
+				$airlineOgfId = $airline->{'ogf:id'};
+				$airlineCountry = $airline->{'is_in:country'};
+				last;
+			}
+		}
 
 		# get all origin airports for this airline
 		foreach my $originCode (keys %{$rawRoutes{$airlineCode}})
@@ -793,67 +804,40 @@ sub buildAirlineRoutes()
 					500
 				);
 
-				# build route structure
-				push @routes, {
-					'origin' => {
-						'airport_code' => $originCode,
-						'airport_name' => $originAirport->{'name'},
-						'city' => $originAirport->{'serves'},
-						'country' => $originAirport->{'is_in:country'},
-						'ogf:id' => $originAirport->{'ogf:id'},
-						'lat' => $originAirport->{'lat'},
-						'lon' => $originAirport->{'lon'}
-					},
-					'destination' => {
-						'airport_code' => $destCode,
-						'airport_name' => $destAirport->{'name'},
-						'city' => $destAirport->{'serves'},
-						'country' => $destAirport->{'is_in:country'},
-						'ogf:id' => $destAirport->{'ogf:id'},
-						'lat' => $destAirport->{'lat'},
-						'lon' => $destAirport->{'lon'}
-					},
+				# build flat route object with all data at top level
+				push @airlineRoutesOut, {
+					'airline_code' => $airlineCode,
+					'airline_name' => $airlineName,
+					'airline_ogf:id' => $airlineOgfId,
+					'airline_country' => $airlineCountry,
+					'origin_code' => $originCode,
+					'origin_name' => $originAirport->{'name'},
+					'origin_city' => $originAirport->{'serves'},
+					'origin_country' => $originAirport->{'is_in:country'},
+					'origin_ogf:id' => $originAirport->{'ogf:id'},
+					'origin_lat' => $originAirport->{'lat'},
+					'origin_lon' => $originAirport->{'lon'},
+					'dest_code' => $destCode,
+					'dest_name' => $destAirport->{'name'},
+					'dest_city' => $destAirport->{'serves'},
+					'dest_country' => $destAirport->{'is_in:country'},
+					'dest_ogf:id' => $destAirport->{'ogf:id'},
+					'dest_lat' => $destAirport->{'lat'},
+					'dest_lon' => $destAirport->{'lon'},
 					'distance_km' => int($distance + 0.5),
 					'geometry' => {
 						'type' => 'LineString',
 						'coordinates' => \@geometry
 					}
 				};
-				$totalRoutes++;
 			}
 		}
-
-		# sort routes by origin then destination
-		@routes = sort {
-			$a->{'origin'}{'airport_code'} cmp $b->{'origin'}{'airport_code'} ||
-			$a->{'destination'}{'airport_code'} cmp $b->{'destination'}{'airport_code'}
-		} @routes;
-
-		# find airline details
-		my $airlineName = $airlineCode;
-		my $airlineOgfId = '';
-		my $airlineCountry = '';
-		foreach my $airline (@airlineOut)
-		{
-			if ($airline->{'ref'} eq $airlineCode)
-			{
-				$airlineName = $airline->{'name'};
-				$airlineOgfId = $airline->{'ogf:id'};
-				$airlineCountry = $airline->{'is_in:country'};
-				last;
-			}
-		}
-
-		$airlineRouteData{$airlineCode} = {
-			'airline_code' => $airlineCode,
-			'airline_name' => $airlineName,
-			'ogf:id' => $airlineOgfId,
-			'is_in:country' => $airlineCountry,
-			'routes' => \@routes,
-			'total_routes' => scalar @routes
-		};
 	}
 
-	# build final output structure - simple array of airline objects
-	@airlineRoutesOut = map { $airlineRouteData{$_} } sort keys %airlineRouteData;
+	# sort routes by airline, then origin, then destination
+	@airlineRoutesOut = sort {
+		$a->{'airline_code'} cmp $b->{'airline_code'} ||
+		$a->{'origin_code'} cmp $b->{'origin_code'} ||
+		$a->{'dest_code'} cmp $b->{'dest_code'}
+	} @airlineRoutesOut;
 }
