@@ -330,7 +330,8 @@ for my $record ( @$records )
 		$airline->{'lon'}                = $record->{lon} || $record->{center}->{lon};
 		$airline->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || '';
 		$airline->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
-		$airline->{'color'}              = parseColor $record->{tags}->{'color'};
+		# Check for both British (colour) and American (color) spelling, prioritize British
+		$airline->{'color'}              = parseColor($record->{tags}->{'colour'} || $record->{tags}->{'color'});
 		addAirline $airline;
 	}
 	else
@@ -533,6 +534,9 @@ sub parseLength($)
 }
 
 #-------------------------------------------------------------------------------
+# Parse and validate color value, or generate random vibrant color if invalid/undefined
+# Accepts hex color in format #RRGGBB (case insensitive)
+# Note: Caller should check both 'colour' and 'color' tags (British spelling preferred)
 sub parseColor($)
 {
 	my($var) = @_;
