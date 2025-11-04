@@ -22,6 +22,7 @@ sub parseContinent($$);
 sub parsePermission($);
 sub parseAerodromeType($);
 sub parseLength($);
+sub parseColor($);
 sub fileExport_Overpass($);
 sub housekeeping($$$$);
 sub haversine_distance($$$$);
@@ -329,6 +330,7 @@ for my $record ( @$records )
 		$airline->{'lon'}                = $record->{lon} || $record->{center}->{lon};
 		$airline->{'ogf:logo'}           = $record->{tags}->{'ogf:logo'} || '';
 		$airline->{'ogf:permission'}     = parsePermission $record->{tags}->{'ogf:permission'};
+		$airline->{'color'}              = parseColor $record->{tags}->{'color'};
 		addAirline $airline;
 	}
 	else
@@ -528,6 +530,51 @@ sub parseLength($)
 	my($var) = @_;
 	return $var + 0 if( defined $var and $var =~ /^\d+$/ and $var >= 200 and $var <= 6000 );
 	return '';
+}
+
+#-------------------------------------------------------------------------------
+sub parseColor($)
+{
+	my($var) = @_;
+
+	# Check if valid hex color format (#RRGGBB)
+	if( defined $var and $var =~ /^#[0-9A-Fa-f]{6}$/ )
+	{
+		return uc $var;  # Return uppercase hex color
+	}
+
+	# Generate random vibrant color for map visualization
+	# Use HSL color space for better visual distribution
+	my $hue = int(rand(360));  # Random hue 0-359
+	my $saturation = 70 + int(rand(30));  # Saturation 70-100%
+	my $lightness = 45 + int(rand(15));   # Lightness 45-60% (avoid too dark/light)
+
+	# Convert HSL to RGB
+	my $c = (1 - abs(2 * $lightness / 100 - 1)) * $saturation / 100;
+	my $x = $c * (1 - abs(($hue / 60) % 2 - 1));
+	my $m = $lightness / 100 - $c / 2;
+
+	my ($r, $g, $b);
+	if ($hue < 60) {
+		($r, $g, $b) = ($c, $x, 0);
+	} elsif ($hue < 120) {
+		($r, $g, $b) = ($x, $c, 0);
+	} elsif ($hue < 180) {
+		($r, $g, $b) = (0, $c, $x);
+	} elsif ($hue < 240) {
+		($r, $g, $b) = (0, $x, $c);
+	} elsif ($hue < 300) {
+		($r, $g, $b) = ($x, 0, $c);
+	} else {
+		($r, $g, $b) = ($c, 0, $x);
+	}
+
+	# Convert to 0-255 range and format as hex
+	$r = int(($r + $m) * 255);
+	$g = int(($g + $m) * 255);
+	$b = int(($b + $m) * 255);
+
+	return sprintf("#%02X%02X%02X", $r, $g, $b);
 }
 
 #-------------------------------------------------------------------------------
@@ -773,6 +820,7 @@ sub buildAirlineRoutes()
 		my $airlineName = $airlineCode;
 		my $airlineOgfId = '';
 		my $airlineCountry = '';
+		my $airlineColor = '#0066CC';  # default blue color
 		foreach my $airline (@airlineOut)
 		{
 			if ($airline->{'ref'} eq $airlineCode)
@@ -780,6 +828,7 @@ sub buildAirlineRoutes()
 				$airlineName = $airline->{'name'};
 				$airlineOgfId = $airline->{'ogf:id'};
 				$airlineCountry = $airline->{'is_in:country'};
+				$airlineColor = $airline->{'color'} if defined $airline->{'color'};
 				last;
 			}
 		}
@@ -810,12 +859,17 @@ sub buildAirlineRoutes()
 					500
 				);
 
+				# convert to MultiMaps line format: "lat,lon:lat,lon:..."
+				# @geometry contains [lon, lat] pairs, reverse to [lat, lon] for MultiMaps
+				my $line_coords = join(':', map { $_->[1] . ',' . $_->[0] } @geometry);
+
 				# build flat route object with all data at top level
 				push @airlineRoutesOut, {
 					'airline_code' => $airlineCode,
 					'airline_name' => $airlineName,
 					'airline_ogf:id' => $airlineOgfId,
 					'airline_country' => $airlineCountry,
+					'color' => $airlineColor,
 					'origin_code' => $originCode,
 					'origin_name' => $originAirport->{'name'},
 					'origin_city' => $originAirport->{'serves'},
@@ -831,10 +885,7 @@ sub buildAirlineRoutes()
 					'dest_lat' => $destAirport->{'lat'},
 					'dest_lon' => $destAirport->{'lon'},
 					'distance_km' => int($distance + 0.5),
-					'geometry' => {
-						'type' => 'LineString',
-						'coordinates' => \@geometry
-					}
+					'line_coords' => $line_coords
 				};
 			}
 		}
