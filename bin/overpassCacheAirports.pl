@@ -885,7 +885,8 @@ sub buildAirlineRoutes()
 					'dest_lat' => $destAirport->{'lat'},
 					'dest_lon' => $destAirport->{'lon'},
 					'distance_km' => int($distance + 0.5),
-					'polyline' => \@polyline
+					'polyline' => \@polyline,
+					'text' => "<b>$airlineName</b> ($airlineCode)<br/>$originAirport->{'name'} ($originAirport->{'serves'}, $originAirport->{'is_in:country'})<br/>→<br/>$destAirport->{'name'} ($destAirport->{'serves'}, $destAirport->{'is_in:country'})<br/><i>Distance: " . int($distance + 0.5) . " km</i>"
 				};
 			}
 		}
