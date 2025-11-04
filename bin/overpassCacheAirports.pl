@@ -859,9 +859,9 @@ sub buildAirlineRoutes()
 					500
 				);
 
-				# convert to MultiMaps line format: "lat,lon:lat,lon:..."
-				# @geometry contains [lon, lat] pairs, reverse to [lat, lon] for MultiMaps
-				my $line_coords = join(':', map { $_->[1] . ',' . $_->[0] } @geometry);
+				# convert to Leaflet polyline format: [[lat, lon], [lat, lon], ...]
+				# @geometry contains [lon, lat] pairs, reverse to [lat, lon] for Leaflet
+				my @polyline = map { [$_->[1], $_->[0]] } @geometry;
 
 				# build flat route object with all data at top level
 				push @airlineRoutesOut, {
@@ -885,7 +885,7 @@ sub buildAirlineRoutes()
 					'dest_lat' => $destAirport->{'lat'},
 					'dest_lon' => $destAirport->{'lon'},
 					'distance_km' => int($distance + 0.5),
-					'line_coords' => $line_coords
+					'polyline' => \@polyline
 				};
 			}
 		}
