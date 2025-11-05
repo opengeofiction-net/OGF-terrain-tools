@@ -856,11 +856,11 @@ sub buildAirlineRoutes()
 					$destAirport->{'lat'}, $destAirport->{'lon'}
 				);
 
-				# generate great circle geometry (point every ~500km)
+				# generate great circle geometry (point every ~250km)
 				my @geometry = interpolate_great_circle(
 					$originAirport->{'lat'}, $originAirport->{'lon'},
 					$destAirport->{'lat'}, $destAirport->{'lon'},
-					500
+					250
 				);
 
 				# convert to Leaflet polyline format: [[lat, lon], [lat, lon], ...]
