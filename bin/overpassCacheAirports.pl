@@ -867,6 +867,22 @@ sub buildAirlineRoutes()
 				# @geometry contains [lon, lat] pairs, reverse to [lat, lon] for Leaflet
 				my @polyline = map { [$_->[1], $_->[0]] } @geometry;
 
+				# calculate line width based on distance (1 for ≤1000km, 4 for ≥10000km)
+				my $width;
+				if ($distance <= 1000) {
+					$width = 1.0;
+				} elsif ($distance >= 10000) {
+					$width = 4.0;
+				} else {
+					# linear interpolation between 1000-10000 km
+					$width = 1.0 + (($distance - 1000) / 9000) * 3.0;
+				}
+				$width = sprintf("%.2f", $width);
+
+				# mark "return" routes (where origin > destination alphabetically)
+				# this allows filtering to show only one direction of each route pair
+				my $isReturn = ($originCode gt $destCode) ? 1 : 0;
+
 				# build flat route object with all data at top level
 				push @airlineRoutesOut, {
 					'airline_code' => $airlineCode,
@@ -890,7 +906,10 @@ sub buildAirlineRoutes()
 					'dest_lon' => $destAirport->{'lon'},
 					'distance_km' => int($distance + 0.5),
 					'polyline' => \@polyline,
-					'text' => "<b>$airlineName</b> ($airlineCode)<br/>$originAirport->{'name'} ($originAirport->{'serves'}, $originAirport->{'is_in:country'})<br/>→<br/>$destAirport->{'name'} ($destAirport->{'serves'}, $destAirport->{'is_in:country'})<br/><i>Distance: " . int($distance + 0.5) . " km</i>"
+					'text' => "<b>$airlineName</b> ($airlineCode)<br/>$originAirport->{'name'} ($originAirport->{'serves'}, $originAirport->{'is_in:country'})<br/>→<br/>$destAirport->{'name'} ($destAirport->{'serves'}, $destAirport->{'is_in:country'})<br/><i>Distance: " . int($distance + 0.5) . " km</i>",
+					'weight' => $width + 0,  # convert to number
+					'opacity' => 0.8,
+					'return' => $isReturn
 				};
 			}
 		}
