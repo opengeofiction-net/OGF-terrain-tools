@@ -887,15 +887,15 @@ sub buildAirlineRoutes()
 				# @geometry contains [lon, lat] pairs, reverse to [lat, lon] for Leaflet
 				my @polyline = map { [$_->[1], $_->[0]] } @geometry;
 
-				# calculate line width based on distance (1 for ≤1000km, 4 for ≥10000km)
+				# calculate line width based on distance (0.7 for ≤500km, 5 for ≥14000km)
 				my $width;
-				if ($distance <= 1000) {
-					$width = 1.0;
-				} elsif ($distance >= 10000) {
-					$width = 4.0;
+				if ($distance <= 500) {
+					$width = 0.7;
+				} elsif ($distance >= 14000) {
+					$width = 5.0;
 				} else {
-					# linear interpolation between 1000-10000 km
-					$width = 1.0 + (($distance - 1000) / 9000) * 3.0;
+					# linear interpolation between 500-14000 km
+					$width = 0.7 + (($distance - 500) / 13500) * 4.3;
 				}
 				$width = sprintf("%.2f", $width);
 
