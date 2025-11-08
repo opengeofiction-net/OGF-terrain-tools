@@ -822,7 +822,7 @@ sub buildAirlineRoutes()
 	{
 		# find airline details
 		my $airlineName = $airlineCode;
-		my $airlineOgfId = '';
+		my $airlineOgfId = undef;
 		my $airlineCountry = '';
 		my $airlineColor = '#0066CC';  # default blue color
 		foreach my $airline (@airlineOut)
@@ -835,6 +835,26 @@ sub buildAirlineRoutes()
 				$airlineColor = $airline->{'color'} if defined $airline->{'color'};
 				last;
 			}
+		}
+
+		# skip routes if airline not found in canonical territories
+		if (!defined $airlineOgfId)
+		{
+			# log error for all routes using this airline
+			foreach my $originCode (keys %{$rawRoutes{$airlineCode}})
+			{
+				foreach my $destCode (keys %{$rawRoutes{$airlineCode}{$originCode}})
+				{
+					push @airlineRoutesErrors, {
+						'origin' => $originCode,
+						'destination' => $destCode,
+						'airline' => $airlineCode,
+						'text' => "airline $airlineCode not found in canonical territory or does not exist"
+					};
+				}
+			}
+			print "> SKIPPING routes for airline $airlineCode: airline not in canonical territory or not found\n";
+			next;
 		}
 
 		# get all origin airports for this airline
