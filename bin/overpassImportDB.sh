@@ -49,7 +49,7 @@ echo "Import finished. Catching up with new changes."
 sudo systemctl start overpass-dispatcher
 sudo systemctl start overpass-area-dispatcher
 
-PYOSMIUM="pyosmium-get-changes --server $REPLICATION_URL -f $DBDIR/replicate-id"
+PYOSMIUM="pyosmium-get-changes --server $REPLICATION_URL -f $DBDIR/replicate_id"
 PYOSMIUM="$PYOSMIUM --no-deduplicate"
 
 # Get the replication id
@@ -58,7 +58,7 @@ $PYOSMIUM -v -O $FNAME --ignore-osmosis-headers
 rm -f $BASEDIR/diffs/*
 
 while $PYOSMIUM -v -s 1000 -o $BASEDIR/diffs/latest.osc; do
-  if [ ! -f $DBDIR/replicate-id ]; then
+  if [ ! -f $DBDIR/replicate_id ]; then
     echo "Replication ID not written."
     exit 1
   fi

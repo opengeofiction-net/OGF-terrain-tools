@@ -7,7 +7,7 @@ REPLICATION_URL=https://data.opengeofiction.net/replication/minute
 OVERPASS_INSTALL=/opt/overpass
 UPDATE_FROM_DIR=$OVERPASS_INSTALL/bin/update_from_dir
 
-PYOSMIUM="pyosmium-get-changes --server $REPLICATION_URL -f $DBDIR/replicate-id"
+PYOSMIUM="pyosmium-get-changes --server $REPLICATION_URL -f $DBDIR/replicate_id"
 PYOSMIUM="$PYOSMIUM --no-deduplicate"
 
 #META=--meta
@@ -16,7 +16,7 @@ META=--keep-attic
 
 status=3 # make it sleep on issues
 
-if [ -f $DBDIR/replicate-id ]; then
+if [ -f $DBDIR/replicate_id ]; then
   # first apply any pending updates
   if [ -f $BASEDIR/diffs/latest.osc ]; then
     DATA_VERSION=`osmium fileinfo -e -g data.timestamp.last $BASEDIR/diffs/latest.osc`
