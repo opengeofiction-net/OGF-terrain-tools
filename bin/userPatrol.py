@@ -15,8 +15,8 @@ Usage:
     bin/userPatrol.py --scp <target>        # Save JSON + scp to remote target
 
 JSON Output (--json):
-    - var/new_users_patrol.json: Detailed report with full violation data
-    - var/new_users_patrol_summary.json: Flat summary matching new_users.json format
+    - var/new_users_patrol.json: Detailed report with full violation data (flagged users only)
+    - var/new_users_patrol_summary.json: Flat summary matching new_users.json format (flagged users only)
       Fields: name, profile, block_status, classification, violations, notified, notes
 
 SCP Output (--scp <target>):
@@ -26,6 +26,7 @@ SCP Output (--scp <target>):
 
 import json
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
 import sqlite3
 import os
@@ -716,9 +717,13 @@ def generate_json_output(all_reports, all_classifications, user_info):
     
     # Detailed flagged users
     for report, cls, u_info in zip(all_reports, all_classifications, user_info):
+        # URL-encode username for profile link
+        username_encoded = urllib.parse.quote(report["username"], safe='')
+        
         entry = {
             "username": report["username"],
             "user_id": report["user_id"],
+            "profile": f"https://opengeofiction.net/user/{username_encoded}",
             "classification": cls["classification"],
             "confidence": cls["confidence"],
             "score": cls["score"],
@@ -727,7 +732,7 @@ def generate_json_output(all_reports, all_classifications, user_info):
             "nodes_checked": report["nodes_checked"],
             "territories_mapped": list(report["territories_mapped"]),
             "violations_count": len(report["violations"]),
-            "notified": report["notified"],
+            "notified": get_notified_status(report, cls),
             "notes": report["notes"],
         }
         if report["violations"]:
@@ -745,25 +750,47 @@ def generate_json_output(all_reports, all_classifications, user_info):
     
     return output
 
+def get_notified_status(report, cls):
+    """Determine notified status as 'Y', 'N', or ''.
+    
+    - 'Y' if user is in the contacted list
+    - 'N' if classification is 'suspicious' or 'needs_review' (and not contacted)
+    - '' otherwise (good_faith users, or flagged users already contacted)
+    """
+    if report.get("notified", False):
+        return "Y"
+    elif cls["classification"] in ("suspicious", "needs_review"):
+        return "N"
+    else:
+        return ""
+
 def generate_summary_json(all_reports, all_classifications, user_info):
     """Generate flat summary JSON matching new_users.json format.
     
+    Only includes flagged users (violations or suspicious/needs_review/likely_vandal).
     Output fields: name, profile, block_status, classification, violations, notified, notes
     """
     summary = []
     
     for report, cls, u_info in zip(all_reports, all_classifications, user_info):
+        # Only include flagged users (same criteria as detailed JSON)
+        if cls["classification"] not in ("likely_vandal", "suspicious", "needs_review") and not report["violations"]:
+            continue
+        
         # Join notes into a simple string
         notes_list = cls["reasons"] if cls["reasons"] else [report["notes"]] if report["notes"] else []
         notes_str = "; ".join(notes_list) if notes_list else ""
         
+        # URL-encode username for profile link
+        username_encoded = urllib.parse.quote(report["username"], safe='')
+        
         entry = {
             "name": report["username"],
-            "profile": f"https://opengeofiction.net/user/{report['username']}",
+            "profile": f"https://opengeofiction.net/user/{username_encoded}",
             "block_status": u_info.get("block_status", ""),
             "classification": cls["classification"],
             "violations": len(report["violations"]),
-            "notified": report["notified"],
+            "notified": get_notified_status(report, cls),
             "notes": notes_str,
         }
         summary.append(entry)
