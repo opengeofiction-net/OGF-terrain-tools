@@ -13,6 +13,8 @@ Usage:
     bin/userPatrol.py --db-report           # Show changeset cache statistics
     bin/userPatrol.py --user <id>           # Patrol specific user
     bin/userPatrol.py --scp <target>        # Save JSON + scp to remote target
+    bin/userPatrol.py --notify              # Send notification messages to flagged users
+    bin/userPatrol.py --notify --dry-run    # Show what would be sent without sending
 
 JSON Output (--json):
     - var/new_users_patrol.json: Detailed report with full violation data (flagged users only)
@@ -53,6 +55,9 @@ NOTIFIED_USERS_URL = "https://wiki.opengeofiction.net/index.php/Help:New_user_pa
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(SCRIPT_DIR, "..", "var", "patrol.db")
 PATROL_DIR = os.path.join(SCRIPT_DIR, "..", "var")
+
+# Credentials path
+CREDENTIALS_PATH = os.path.expanduser("~/ogf-user.env")
 
 # ─── User Permission Cache ───────────────────────────────────────────────────
 
@@ -128,6 +133,422 @@ def fetch_user_allowed_editors(username):
         print(f"  [ERROR] Could not fetch permissions for {username}: {e}")
         permission_cache[username] = set()
         return set()
+
+# ─── OGF Messaging ───────────────────────────────────────────────────────────
+
+def load_ogf_credentials():
+    """Load OGF credentials from the credentials file."""
+    credentials = {}
+    if os.path.exists(CREDENTIALS_PATH):
+        with open(CREDENTIALS_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    key, value = line.split("=", 1)
+                    credentials[key.strip()] = value.strip()
+    return credentials
+
+def ogf_login(username, password):
+    """
+    Log in to OGF and return a session cookie.
+    OGF uses web session login (not OAuth2) for messaging.
+    Returns: (session_cookie, csrf_token) or (None, None) on failure.
+    """
+    try:
+        import http.cookiejar
+        
+        # Create cookie jar and opener
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        opener.addheaders = [("User-Agent", USER_AGENT)]
+        
+        # First, get the login page to extract CSRF token
+        login_url = "https://opengeofiction.net/login"
+        req = urllib.request.Request(login_url, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html",
+        })
+        with opener.open(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8")
+            # Extract CSRF token from the login form
+            csrf_match = re.search(r'name="authenticity_token" value="([^"]+)"', html)
+            if not csrf_match:
+                print(f"  [LOGIN ERROR] Could not find CSRF token")
+                return None, None
+            csrf_token = csrf_match.group(1)
+        
+        # Perform login using the same opener (preserves cookies)
+        login_data = urllib.parse.urlencode({
+            "username": username,
+            "password": password,
+            "authenticity_token": csrf_token,
+        }).encode("utf-8")
+        
+        req = urllib.request.Request(login_url, data=login_data, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": login_url,
+        })
+        
+        try:
+            resp = opener.open(req, timeout=15)
+            resp.read()
+        except urllib.error.HTTPError as e:
+            print(f"  [LOGIN ERROR] HTTP {e.code}: Login failed")
+            return None, None
+        
+        # Extract session cookie
+        session_cookie = None
+        for cookie in cookie_jar:
+            if cookie.name == "_osm_session":
+                session_cookie = f"{cookie.name}={cookie.value}"
+                break
+        
+        if not session_cookie:
+            print(f"  [LOGIN ERROR] No session cookie received")
+            return None, None
+        
+        return session_cookie, csrf_token
+        
+    except Exception as e:
+        print(f"  [LOGIN ERROR] {e}")
+        return None, None
+
+def get_csrf_token(session_cookie):
+    """
+    Get a fresh CSRF token from a page while authenticated.
+    """
+    try:
+        # Fetch a page with a form (e.g., message form)
+        url = "https://opengeofiction.net/message/new"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html",
+            "Cookie": session_cookie,
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8")
+            csrf_match = re.search(r'name="authenticity_token" value="([^"]+)"', html)
+            if csrf_match:
+                return csrf_match.group(1)
+            print(f"  [CSRF ERROR] Could not find CSRF token")
+            return None
+    except Exception as e:
+        print(f"  [CSRF ERROR] {e}")
+        return None
+
+def send_ogf_message(session_cookie, recipient_username, subject, body, sender_display_name):
+    """
+    Send a message to an OGF user.
+    
+    Args:
+        session_cookie: The session cookie string (e.g., "_osm_session=abc123")
+        recipient_username: The username to send the message to
+        subject: Message subject
+        body: Message body (Markdown format)
+        sender_display_name: The sender's display name (for signature in body)
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        # First, get the message form page to extract CSRF token
+        form_url = f"https://opengeofiction.net/message/new/{urllib.parse.quote(recipient_username)}"
+        req = urllib.request.Request(form_url, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html",
+            "Cookie": session_cookie,
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8")
+            
+            # Extract CSRF token
+            csrf_match = re.search(r'name="authenticity_token" value="([^"]+)"', html)
+            if not csrf_match:
+                print(f"  [MESSAGE ERROR] Could not find CSRF token for {recipient_username}")
+                return False
+            csrf_token = csrf_match.group(1)
+        
+        # Send the message to /messages
+        # Note: display_name should be the RECIPIENT's name (from the form)
+        # The sender is identified by the session cookie
+        message_data = urllib.parse.urlencode({
+            "utf8": "✓",
+            "message[title]": subject,
+            "message[body]": body,
+            "display_name": recipient_username,  # Recipient's name (from form)
+            "authenticity_token": csrf_token,
+            "commit": "Send",
+        }).encode("utf-8")
+        
+        req = urllib.request.Request("https://opengeofiction.net/messages", data=message_data, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": form_url,
+            "Cookie": session_cookie,
+        })
+        
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                # Check if redirected to inbox (success)
+                if "inbox" in resp.url.lower():
+                    return True
+                response_html = resp.read().decode("utf-8")
+                # Check for success indicators
+                if "Message sent" in response_html or "Your message has been sent" in response_html:
+                    return True
+                # Check if we're still on the form page (error)
+                if "message[body]" in response_html or "message_title" in response_html:
+                    print(f"  [MESSAGE ERROR] Message may not have been sent for {recipient_username}")
+                    return False
+                return True  # Assume success if no obvious error
+        except urllib.error.HTTPError as e:
+            print(f"  [MESSAGE ERROR] HTTP {e.code} for {recipient_username}")
+            return False
+        
+    except Exception as e:
+        print(f"  [MESSAGE ERROR] {e}")
+        return False
+
+# ─── Wiki Editing (MediaWiki API) ────────────────────────────────────────────
+
+WIKI_URL = "https://wiki.opengeofiction.net"
+WIKI_API_URL = f"{WIKI_URL}/api.php"
+
+def wiki_api_request(session, params, method="GET"):
+    """
+    Make a request to the MediaWiki API.
+    
+    Args:
+        session: tuple of (cookie_jar, opener) from wiki_login
+        params: dict of API parameters
+        method: "GET" or "POST"
+    
+    Returns:
+        Parsed JSON response as dict
+    """
+    cookie_jar, opener = session
+    url = WIKI_API_URL
+    
+    if method == "GET":
+        query = urllib.parse.urlencode(params)
+        req = urllib.request.Request(f"{url}?{query}")
+    else:
+        data = urllib.parse.urlencode(params).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+        })
+    
+    with opener.open(req, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def wiki_login(username, password):
+    """
+    Log in to the OGF wiki using the MediaWiki API.
+    Returns: (cookie_jar, opener) or (None, None) on failure.
+    """
+    try:
+        import http.cookiejar
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+        opener.addheaders = [
+            ("User-Agent", USER_AGENT),
+            ("Accept", "application/json"),
+        ]
+        session = (cookie_jar, opener)
+        
+        # Step 1: Get login token
+        params = {
+            "action": "query",
+            "meta": "tokens",
+            "type": "login",
+            "format": "json",
+        }
+        data = wiki_api_request(session, params)
+        login_token = data.get("query", {}).get("tokens", {}).get("logintoken")
+        if not login_token:
+            print(f"  [WIKI LOGIN ERROR] Could not get login token")
+            return None, None
+        
+        # Step 2: Login with credentials
+        params = {
+            "action": "login",
+            "lgname": username,
+            "lgpassword": password,
+            "lgtoken": login_token,
+            "format": "json",
+        }
+        data = wiki_api_request(session, params, method="POST")
+        
+        result = data.get("login", {}).get("result", "")
+        if result == "Success":
+            print(f"  ✓ Logged in to wiki as {username}")
+            return cookie_jar, opener
+        
+        # Try clientlogin for newer MediaWiki
+        if result == "NeedToken":
+            params = {
+                "action": "clientlogin",
+                "username": username,
+                "password": password,
+                "logintoken": login_token,
+                "loginreturnurl": WIKI_URL,
+                "format": "json",
+            }
+            data = wiki_api_request(session, params, method="POST")
+            status = data.get("clientlogin", {}).get("status", "")
+            if status == "PASS":
+                print(f"  ✓ Logged in to wiki as {username}")
+                return cookie_jar, opener
+            elif status == "UI":
+                msg = data.get("clientlogin", {}).get("message", "Unknown")
+                print(f"  [WIKI LOGIN ERROR] Login requires UI: {msg}")
+                return None, None
+            else:
+                print(f"  [WIKI LOGIN ERROR] clientlogin failed: {data}")
+                return None, None
+        
+        print(f"  [WIKI LOGIN ERROR] Login failed: {data}")
+        return None, None
+        
+    except urllib.error.HTTPError as e:
+        print(f"  [WIKI LOGIN ERROR] HTTP {e.code}")
+        return None, None
+    except Exception as e:
+        print(f"  [WIKI LOGIN ERROR] {e}")
+        return None, None
+
+
+def wiki_get_csrf_token(session):
+    """Get CSRF token from the wiki API."""
+    params = {
+        "action": "query",
+        "meta": "tokens",
+        "type": "csrf",
+        "format": "json",
+    }
+    data = wiki_api_request(session, params)
+    return data.get("query", {}).get("tokens", {}).get("csrftoken")
+
+
+def wiki_get_page_content(session, page_title):
+    """Get the raw content of a wiki page via API."""
+    params = {
+        "action": "query",
+        "titles": page_title,
+        "prop": "revisions",
+        "rvprop": "content",
+        "format": "json",
+    }
+    data = wiki_api_request(session, params)
+    
+    pages = data.get("query", {}).get("pages", {})
+    page_id = list(pages.keys())[0]
+    
+    if page_id == "-1":
+        return None  # Page doesn't exist
+    
+    return pages[page_id].get("revisions", [{}])[0].get("*", "")
+
+
+def wiki_edit_page(session, page_title, content, edit_summary):
+    """
+    Edit a wiki page via the MediaWiki API.
+    
+    Args:
+        session: tuple of (cookie_jar, opener) from wiki_login
+        page_title: The wiki page title
+        content: The new page content
+        edit_summary: Edit summary
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        # Get CSRF token
+        csrf_token = wiki_get_csrf_token(session)
+        if not csrf_token:
+            print(f"  [WIKI EDIT ERROR] Could not get CSRF token")
+            return False
+        
+        # Edit the page
+        params = {
+            "action": "edit",
+            "title": page_title,
+            "text": content,
+            "summary": edit_summary,
+            "token": csrf_token,
+            "format": "json",
+            "bot": "1",
+        }
+        data = wiki_api_request(session, params, method="POST")
+        
+        if "edit" in data:
+            result = data["edit"]
+            if result.get("result") == "Success":
+                return True
+            # Check for specific error messages
+            error_info = result.get("info", "Unknown error")
+            print(f"  [WIKI EDIT ERROR] {error_info}")
+            return False
+        
+        print(f"  [WIKI EDIT ERROR] Unexpected response: {data}")
+        return False
+        
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print(f"  [WIKI EDIT ERROR] HTTP 403 - Page '{page_title}' is protected")
+        else:
+            print(f"  [WIKI EDIT ERROR] HTTP {e.code}")
+        return False
+    except Exception as e:
+        print(f"  [WIKI EDIT ERROR] {e}")
+        return False
+
+
+def add_contacted_user_wiki(session, username, signature_user="wangi"):
+    """
+    Add a user to the contacted users list on the wiki.
+    
+    Format: * {{OGF user|USERNAME}} /~~~~
+    
+    The ~~~~ is MediaWiki markup that expands to the editor's username and timestamp.
+    
+    Returns:
+        True if successful, False otherwise.
+    """
+    page_title = "Help:New_user_patrol"
+    marker = "<!-- ↓↓↓↓↓↓↓↓ ADD NEW ENTRY IMMEDIATELY BELOW THIS LINE ↓↓↓↓↓↓↓↓ -->"
+    
+    # Get current page content
+    old_text = wiki_get_page_content(session, page_title)
+    if old_text is None:
+        print(f"  [WIKI ERROR] Could not fetch page content for '{page_title}'")
+        return False
+    
+    # Find the insertion marker
+    if marker not in old_text:
+        print(f"  [WIKI ERROR] Could not find insertion marker in page")
+        return False
+    
+    # Prepare new entry
+    # Note: {{{{ and }}}} in f-strings produce {{ and }} in output
+    new_entry = f"\n* {{{{OGF user|{username}}}}} /~~~~"
+    
+    # Insert after the marker
+    insert_pos = old_text.find(marker) + len(marker)
+    new_text = old_text[:insert_pos] + new_entry + old_text[insert_pos:]
+    
+    # Edit the page
+    edit_summary = f"Adding {username} to contacted users list"
+    success = wiki_edit_page(session, page_title, new_text, edit_summary)
+    
+    if success:
+        return True
+    return False
 
 # ─── HTTP Helpers ────────────────────────────────────────────────────────────
 
@@ -641,6 +1062,64 @@ def classify_user(user_info, report):
 # Global for use in classify_user (set by main)
 statuses_global = {}
 
+# ─── Notification Messaging ──────────────────────────────────────────────────
+
+NOTIFICATION_TEMPLATE = """Hi there, I just noticed your [recent mapping]({changeset_url}) in OpenGeofiction.
+
+Unfortunately, this area is not open to public editing. Before making any more edits here, please take a moment to read the [getting started](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started) and [site policies pages,](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Site_policies) which have instructions for new users.
+
+Please note that new users can edit only in the blue territories on the [overview map.](http://wiki.opengeofiction.net/index.php/OpenGeofiction:Territories) Once you've built up a lengthier edit history, you will be able to [request a territory](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_assignment). You may also be interested in participating in a [collaborative project](https://wiki.opengeofiction.net/index.php/OpenGeofiction:List_of_collaborative_projects).
+
+If you have questions or anything, just let me know. Thanks for understanding, and welcome to our world! 
+
+Brothie (Adminbot, for the admin team)"""
+
+def get_most_recent_violation_changeset(report):
+    """Get the most recent violating changeset URL from a patrol report."""
+    if not report["violations"]:
+        return None
+    # Violations are in order they were found; get the last one (most recent)
+    last_violation = report["violations"][-1]
+    changeset_id = last_violation.get("changeset_id")
+    if changeset_id:
+        return f"https://opengeofiction.net/changeset/{changeset_id}"
+    return None
+
+def send_notification_to_user(session_cookie, username, report, dry_run=False):
+    """
+    Send a notification message to a user about territorial violations.
+    
+    Args:
+        session_cookie: OGF session cookie
+        username: The username to notify
+        report: The patrol report for this user
+        dry_run: If True, only print what would be sent
+    
+    Returns:
+        True if message was sent successfully, False otherwise.
+    """
+    changeset_url = get_most_recent_violation_changeset(report)
+    if not changeset_url:
+        print(f"  [NOTIFY ERROR] No violating changeset found for {username}")
+        return False
+    
+    subject = "Welcome to OpenGeofiction - Important mapping notice"
+    body = NOTIFICATION_TEMPLATE.format(changeset_url=changeset_url)
+    
+    if dry_run:
+        print(f"  [DRY-RUN] Would send message to {username}:")
+        print(f"    Subject: {subject}")
+        print(f"    Changeset: {changeset_url}")
+        return True
+    
+    print(f"  [NOTIFY] Sending message to {username}...", end=" ", flush=True)
+    success = send_ogf_message(session_cookie, username, subject, body, "Brothie")
+    if success:
+        print("✓ Sent")
+    else:
+        print("✗ Failed")
+    return success
+
 # ─── Database Storage ────────────────────────────────────────────────────────
 
 def init_db():
@@ -903,6 +1382,8 @@ def main():
     target_user = None
     json_output = False
     scp_target = None
+    dry_run = False
+    send_notifications = False
     
     args = sys.argv[1:]
     i = 0
@@ -920,6 +1401,12 @@ def main():
             i += 2
         elif args[i] == "--db-report":
             mode = "db-report"
+            i += 1
+        elif args[i] == "--dry-run":
+            dry_run = True
+            i += 1
+        elif args[i] == "--notify":
+            send_notifications = True
             i += 1
         else:
             i += 1
@@ -994,6 +1481,94 @@ def main():
         print_report(report, classification)
     
     print_summary(all_reports, all_classifications)
+    
+    # ─── Send Notifications ──────────────────────────────────────────────────
+    
+    if send_notifications:
+        print(f"\n{'='*60}")
+        if dry_run:
+            print(f"  DRY-RUN MODE - No messages will be sent")
+        print(f"  SENDING NOTIFICATIONS")
+        print(f"{'='*60}")
+        
+        # Load credentials
+        credentials = load_ogf_credentials()
+        if not credentials.get("USERNAME") or not credentials.get("PASSWORD"):
+            print(f"  [ERROR] Could not load credentials from {CREDENTIALS_PATH}")
+        else:
+            username = credentials["USERNAME"]
+            password = credentials["PASSWORD"]
+            print(f"  Logging in as {username}...")
+            
+            # Login to OGF for messaging
+            session_cookie, _ = ogf_login(username, password)
+            
+            # Login to wiki for editing (may fail due to bot protection)
+            wiki_cookie_jar, wiki_opener = wiki_login(username, password)
+            
+            if not session_cookie:
+                print(f"  [ERROR] Failed to login to OGF for messaging")
+            else:
+                print(f"  ✓ Logged in to OGF")
+                
+                if not wiki_opener:
+                    print(f"  [WARN] Wiki login failed - wiki updates will be skipped")
+                    print(f"         Please manually add notified users to: https://wiki.opengeofiction.net/index.php/Help:New_user_patrol")
+                
+                # Track users to notify and successfully notified users
+                users_to_notify = []
+                successfully_notified = []
+                
+                for report, cls, user_info in zip(all_reports, all_classifications, users):
+                    # Check if user should be notified:
+                    # 1. Classification is needs_review or worse
+                    # 2. Has violations
+                    # 3. Not already in notified_users list
+                    should_notify = (
+                        cls["classification"] in ("needs_review", "suspicious", "likely_vandal") and
+                        len(report["violations"]) > 0 and
+                        report["username"] not in notified_users
+                    )
+                    
+                    if should_notify:
+                        users_to_notify.append((report, cls, user_info))
+                
+                if not users_to_notify:
+                    print(f"  No users require notification")
+                else:
+                    print(f"  Found {len(users_to_notify)} user(s) to notify")
+                    
+                    for report, cls, user_info in users_to_notify:
+                        username_to_notify = report["username"]
+                        
+                        # Send message
+                        success = send_notification_to_user(session_cookie, username_to_notify, report, dry_run)
+                        
+                        if success:
+                            # Message was sent successfully - track it
+                            successfully_notified.append(username_to_notify)
+                            
+                            # Add to wiki contacted list (unless dry-run)
+                            if not dry_run and wiki_opener:
+                                print(f"  [WIKI] Adding {username_to_notify} to contacted users list... ", end="", flush=True)
+                                wiki_session = (wiki_cookie_jar, wiki_opener)
+                                wiki_success = add_contacted_user_wiki(wiki_session, username_to_notify, "wangi")
+                                if wiki_success:
+                                    print("✓ Added")
+                                else:
+                                    print("✗ Failed (falling back to local DB)")
+                            elif dry_run:
+                                print(f"  [DRY-RUN] Would add {username_to_notify} to wiki contacted list")
+                            else:
+                                print(f"  [SKIP] Wiki update skipped (wiki login unavailable)")
+                        
+                        # Small delay between messages to be respectful
+                        if not dry_run:
+                            time.sleep(1)
+                
+                print(f"\n  Notification summary: {len(successfully_notified)} user(s) notified")
+                if successfully_notified:
+                    print(f"    Notified: {', '.join(successfully_notified)}")
     
     # Generate JSON output if requested
     if json_output:
