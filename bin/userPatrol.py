@@ -54,6 +54,81 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(SCRIPT_DIR, "..", "var", "patrol.db")
 PATROL_DIR = os.path.join(SCRIPT_DIR, "..", "var")
 
+# ─── User Permission Cache ───────────────────────────────────────────────────
+
+permission_cache = {}  # username -> set of allowed editors
+
+def fetch_user_allowed_editors(username):
+    """
+    Fetch a user's profile page and extract the list of users they've given permission to edit their territory.
+    
+    Looks for patterns like:
+    "People currently working on Cygagon who I have given them permission to:"
+    followed by a list of usernames.
+    
+    Returns:
+        set of usernames who have permission, or empty set if none found.
+    """
+    if username in permission_cache:
+        return permission_cache[username]
+    
+    try:
+        # Fetch profile page
+        url = f"https://opengeofiction.net/user/{urllib.parse.quote(username)}"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8")
+        
+        # Extract the description section - look for permission patterns
+        allowed = set()
+        
+        # Find the permission section and extract names from following <p> tags
+        # Pattern: "People currently working on X who I have given them permission to:"
+        permission_patterns = [
+            r'[Pp]eople (currently )?working (on [^:<>]+ )?who I have given (them )?permission to:',
+            r'[Pp]eople working here with permission:',
+            r'[Aa]llowed editors:',
+            r'[Pp]ermission granted to:',
+            r'[Uu]sers with permission:',
+            r'[Mm]appers with permission:',
+        ]
+        
+        for pattern in permission_patterns:
+            match = re.search(pattern, html)
+            if match:
+                # Get the HTML after the match
+                start = match.end()
+                following_html = html[start:start+2000]  # Get next 2000 chars
+                
+                # Extract text from <p> tags
+                p_tags = re.findall(r'<p>([^<]+)</p>', following_html)
+                for text in p_tags:
+                    name = text.strip()
+                    # Filter out empty lines and non-name text
+                    if name and len(name) > 1 and len(name) < 50:
+                        # Skip common non-name words that might appear
+                        if name.lower() not in ['and', 'or', 'the', 'to', 'for', 'with', 'any', 'all', 'currently']:
+                            # Skip entries that look like sentences (have periods or are too long)
+                            # Usernames typically don't have periods or multiple words with punctuation
+                            if '.' not in name or name.count(' ') <= 2:
+                                # Additional check: usernames are usually 1-3 words, no sentences
+                                if not re.search(r'\.\s*[A-Z]', name):  # No sentence patterns
+                                    allowed.add(name)
+                break
+        
+        permission_cache[username] = allowed
+        if allowed:
+            print(f"  [PERMISSION] {username}: {len(allowed)} allowed editors: {', '.join(sorted(allowed))}")
+        return allowed
+        
+    except Exception as e:
+        print(f"  [ERROR] Could not fetch permissions for {username}: {e}")
+        permission_cache[username] = set()
+        return set()
+
 # ─── HTTP Helpers ────────────────────────────────────────────────────────────
 
 def oget(path):
@@ -462,11 +537,30 @@ def classify_user(user_info, report):
     # ── 3. Territorial violations ───────────────────────────────────────
     
     if violations > 0:
-        # Categorize violation types
+        # Categorize violation types and check for explicit permissions
         violation_types = defaultdict(int)
-        for v in report["violations"]:
-            violation_types[v["territory_status"]] += 1
+        permitted_violations = defaultdict(int)  # violations that have explicit permission
         
+        for v in report["violations"]:
+            status = v["territory_status"]
+            owner = v.get("territory_owner")
+            
+            # Check if user has explicit permission from territory owner
+            has_permission = False
+            if owner and status in ["owned", "marked for withdrawal"]:
+                allowed_editors = fetch_user_allowed_editors(owner)
+                if username in allowed_editors:
+                    has_permission = True
+                    permitted_violations[status] += 1
+                    continue  # Skip this violation - it's permitted
+            
+            violation_types[status] += 1
+        
+        # Report permitted edits (no penalty)
+        for status, count in permitted_violations.items():
+            reasons.append(f"Mapped {count} nodes in {status} territories with owner permission (no penalty)")
+        
+        # Report actual violations
         for status, count in violation_types.items():
             if status == "reserved" or status == "archived":
                 reasons.append(f"Mapped {count} nodes in {status} territories")
