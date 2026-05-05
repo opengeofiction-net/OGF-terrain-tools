@@ -3,7 +3,7 @@
 OpenGeofiction New User Patrol - Territorial Compliance & Classification
 
 Checks if new users are mapping only in permitted territories
-(only "open to all" = blue territories) and classifies users by behavior.
+("open to all" = blue, and collaborative territories) and classifies users by behavior.
 
 Uses SQLite cache for changeset data to avoid re-fetching from the API.
 
@@ -706,10 +706,10 @@ def _parse_statuses_data(data):
     return result
 
 def get_permissible_territories(statuses):
-    """Return set of territory IDs that are 'open to all' only."""
+    """Return set of territory IDs that are 'open to all' or 'collaborative'."""
     return {
         k for k, v in statuses.items()
-        if v["status"] == "open to all"
+        if v["status"] in ("open to all", "collaborative")
     }
 
 def load_notified_users():
@@ -990,9 +990,6 @@ def classify_user(user_info, report):
                 suffix = " (needs admin approval)" if status == "available" else ""
                 reasons.append(f"Mapped {count} nodes in {status} territories{suffix}")
                 score -= 2
-            elif status == "collaborative":
-                reasons.append(f"Mapped {count} nodes in collaborative territories")
-                score -= 1
             else:
                 reasons.append(f"Mapped {count} nodes in '{status}' territory")
                 score -= 1
