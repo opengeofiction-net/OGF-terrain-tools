@@ -24,6 +24,11 @@ JSON Output (--json):
 SCP Output (--scp <target>):
     Automatically enables --json and copies both JSON files to the specified
     scp target (e.g., ogf@util.ogf:/opt/opengeofiction/sync-to-ogf/utility)
+
+Bot Control:
+    --notify and --scp require {{permission|yes}} on User:Brothie wiki page.
+    If the page cannot be loaded or the marker is absent, these actions are skipped.
+    The patrol check and JSON generation still run regardless.
 """
 
 import json
@@ -50,6 +55,7 @@ NEW_USERS_URL = "https://data.opengeofiction.net/utility/new_users.json"
 TERRITORY_URL = "https://data.opengeofiction.net/utility/territory.json"
 TERRITORY_STATUS_URL = "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_administration?action=raw"
 NOTIFIED_USERS_URL = "https://wiki.opengeofiction.net/index.php/Help:New_user_patrol?action=raw"
+BOT_CONTROL_URL = "https://wiki.opengeofiction.net/index.php/User:Brothie?action=raw"
 
 # Paths relative to script location
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -743,6 +749,31 @@ def load_notified_users():
 
     print(f"  Loaded {len(usernames)} notified users")
     return usernames
+
+def check_bot_permission():
+    """
+    Check the bot control wiki page for {{permission|yes}}.
+    Returns True if permission is granted, False otherwise.
+    If the page cannot be loaded, assume no permission.
+    """
+    print("[5/5] Checking bot control permission...")
+    try:
+        req = urllib.request.Request(BOT_CONTROL_URL, headers={
+            "User-Agent": USER_AGENT,
+            "Referer": "https://opengeofiction.net/",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+    except Exception as e:
+        print(f"  WARNING: Could not load bot control page: {e}")
+        return False
+
+    if "{{permission|yes}}" in raw:
+        print("  ✓ Bot permission granted")
+        return True
+    else:
+        print("  ✗ Bot permission NOT granted (missing {{permission|yes}})")
+        return False
 
 # ─── API Data Fetching ───────────────────────────────────────────────────────
 
@@ -1457,9 +1488,19 @@ def main():
     statuses = load_territory_statuses()
     permissible = get_permissible_territories(statuses)
     notified_users = load_notified_users()
+    permitted = check_bot_permission()
     statuses_global = statuses  # For use in classify_user
     print(f"  Permissible (blue) territories: {len(permissible)}")
-    
+
+    # Gate --notify and --scp behind bot control permission
+    if not permitted:
+        if send_notifications:
+            print("  ⛔ Bot permission denied — skipping --notify")
+            send_notifications = False
+        if scp_target:
+            print("  ⛔ Bot permission denied — skipping --scp")
+            scp_target = None
+
     all_reports = []
     all_classifications = []
     
