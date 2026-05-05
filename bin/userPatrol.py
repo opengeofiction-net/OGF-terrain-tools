@@ -1067,9 +1067,7 @@ Unfortunately, this area is not open to public editing. Before making any more e
 
 Please note that new users can edit only in the blue territories on the [overview map.](http://wiki.opengeofiction.net/index.php/OpenGeofiction:Territories) Once you've built up a lengthier edit history, you will be able to [request a territory](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_assignment). You may also be interested in participating in a [collaborative project](https://wiki.opengeofiction.net/index.php/OpenGeofiction:List_of_collaborative_projects).
 
-If you have questions or anything, just let me know. Thanks for understanding, and welcome to our world! 
-
-Brothie (Adminbot, for the admin team)"""
+Thanks/brothie (Adminbot, for the admin team) -- THIS ACCOUNT IS NOT MONITORED, DO NOT REPLY"""
 
 def get_most_recent_violation_changeset(report):
     """Get the most recent violating changeset URL from a patrol report."""
