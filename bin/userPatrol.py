@@ -65,6 +65,12 @@ PATROL_DIR = os.path.join(SCRIPT_DIR, "..", "var")
 # Credentials path
 CREDENTIALS_PATH = os.path.expanduser("~/ogf-user.env")
 
+# Buffer around territory boundaries (degrees). Nodes within this distance
+# of a territory edge are considered inside, to avoid false positives on
+# boundary nodes due to rounding or slight polygon inaccuracies.
+# ~0.003 deg ≈ 330m near the equator.
+TERRITORY_BUFFER_DEG = 0.003
+
 # ─── User Permission Cache ───────────────────────────────────────────────────
 
 permission_cache = {}  # username -> set of allowed editors
@@ -621,6 +627,40 @@ def point_in_polygon_with_holes(lon, lat, outer_ring, holes=None):
                 return False
     return True
 
+def _point_to_segment_distance(px, py, x1, y1, x2, y2):
+    """
+    Compute the minimum distance from point (px, py) to line segment (x1,y1)-(x2,y2).
+    Uses squared distance to avoid sqrt until necessary.
+    """
+    dx = x2 - x1
+    dy = y2 - y1
+    len_sq = dx * dx + dy * dy
+    if len_sq == 0:
+        # Segment is a point
+        return (px - x1) ** 2 + (py - y1) ** 2
+    # Project point onto line, clamped to segment
+    t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / len_sq))
+    proj_x = x1 + t * dx
+    proj_y = y1 + t * dy
+    return (px - proj_x) ** 2 + (py - proj_y) ** 2
+
+def point_near_polygon(lon, lat, polygon, threshold_deg):
+    """
+    Check if (lon, lat) is within threshold_deg of any edge of the polygon.
+    polygon: list of (lon, lat). threshold_deg: degrees.
+    """
+    n = len(polygon)
+    if n < 2:
+        return False
+    threshold_sq = threshold_deg * threshold_deg
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        dist_sq = _point_to_segment_distance(lon, lat, x1, y1, x2, y2)
+        if dist_sq <= threshold_sq:
+            return True
+    return False
+
 def parse_territory_polygon(coords):
     """Parse territory.json polygon into (outer_ring, holes)."""
     if not coords or len(coords) < 2:
@@ -912,6 +952,33 @@ def patrol_user(username, user_id, territories, permissible, statuses, notified_
             )
 
             if not hits:
+                # Node is not inside any territory polygon (e.g., in the sea).
+                # Check if it's within the boundary buffer of any territory
+                # before flagging it as a violation.
+                near_boundary = False
+                for ogf_id, terr in territories.items():
+                    if not terr["outer_ring"]:
+                        continue
+                    if point_near_polygon(
+                        node["lon"], node["lat"],
+                        terr["outer_ring"],
+                        TERRITORY_BUFFER_DEG,
+                    ):
+                        near_boundary = True
+                        break
+                    if terr.get("holes"):
+                        for hole in terr["holes"]:
+                            if point_near_polygon(
+                                node["lon"], node["lat"],
+                                hole,
+                                TERRITORY_BUFFER_DEG,
+                            ):
+                                near_boundary = True
+                                break
+                        if near_boundary:
+                            break
+                if near_boundary:
+                    continue
                 # Node is not inside any territory polygon (e.g., in the sea)
                 report["violations"].append({
                     "changeset_id": cs["id"],
