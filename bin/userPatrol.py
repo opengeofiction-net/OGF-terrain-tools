@@ -911,6 +911,20 @@ def patrol_user(username, user_id, territories, permissible, statuses, notified_
                 territories, permissible, statuses
             )
 
+            if not hits:
+                # Node is not inside any territory polygon (e.g., in the sea)
+                report["violations"].append({
+                    "changeset_id": cs["id"],
+                    "node_id": node["id"],
+                    "lat": node["lat"],
+                    "lon": node["lon"],
+                    "territory_id": None,
+                    "territory_status": "outside territory",
+                    "territory_owner": None,
+                    "node_tags": node.get("tags", {}),
+                })
+                continue
+
             for terr_id, status, owner, terr_type in hits:
                 report["territories_mapped"].add(terr_id)
 
@@ -1014,7 +1028,10 @@ def classify_user(user_info, report):
         
         # Report actual violations
         for status, count in violation_types.items():
-            if status == "reserved" or status == "archived":
+            if status == "outside territory":
+                reasons.append(f"Mapped {count} nodes outside any territory")
+                score -= 2
+            elif status == "reserved" or status == "archived":
                 reasons.append(f"Mapped {count} nodes in {status} territories")
                 score -= 3
             elif status == "owned" or status == "available" or status == "marked for withdrawal":
@@ -1100,6 +1117,14 @@ Please note that new users can edit only in the blue territories on the [overvie
 
 Thanks/brothie (Adminbot, for the admin team) -- THIS ACCOUNT IS NOT MONITORED, DO NOT REPLY"""
 
+NOTIFICATION_TEMPLATE_SEA = """Hi there, I just noticed your [recent mapping]({changeset_url}) in OpenGeofiction.
+
+Unfortunately, you are mapping outside any territory. Before making any more edits, please take a moment to read the [getting started](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started) and [site policies pages,](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Site_policies) which have instructions for new users.
+
+Please note that new users can edit only in the blue territories on the [overview map.](http://wiki.opengeofiction.net/index.php/OpenGeofiction:Territories) Once you've built up a lengthier edit history, you will be able to [request a territory](https://wiki.opengeofiction.net/index.php/OpenGeofiction:Territory_assignment). You may also be interested in participating in a [collaborative project](https://wiki.opengeofiction.net/index.php/OpenGeofiction:List_of_collaborative_projects).
+
+Thanks/brothie (Adminbot, for the admin team) -- THIS ACCOUNT IS NOT MONITORED, DO NOT REPLY"""
+
 def get_most_recent_violation_changeset(report):
     """Get the most recent violating changeset URL from a patrol report."""
     if not report["violations"]:
@@ -1129,8 +1154,12 @@ def send_notification_to_user(session_cookie, username, report, dry_run=False):
         print(f"  [NOTIFY ERROR] No violating changeset found for {username}")
         return False
     
+    # Pick template based on violation types
+    has_sea_only = all(v.get("territory_status") == "outside territory" for v in report["violations"])
+    body = NOTIFICATION_TEMPLATE_SEA.format(changeset_url=changeset_url) if has_sea_only \
+        else NOTIFICATION_TEMPLATE.format(changeset_url=changeset_url)
+    
     subject = "Welcome to OpenGeofiction - Important mapping notice"
-    body = NOTIFICATION_TEMPLATE.format(changeset_url=changeset_url)
     
     if dry_run:
         print(f"  [DRY-RUN] Would send message to {username}:")
