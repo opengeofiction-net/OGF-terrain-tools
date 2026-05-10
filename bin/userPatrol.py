@@ -68,8 +68,10 @@ CREDENTIALS_PATH = os.path.expanduser("~/ogf-user.env")
 # Buffer around territory boundaries (degrees). Nodes within this distance
 # of a territory edge are considered inside, to avoid false positives on
 # boundary nodes due to rounding or slight polygon inaccuracies.
-# ~0.003 deg ≈ 330m near the equator.
-TERRITORY_BUFFER_DEG = 0.003
+# ~0.01 deg ≈ 1.1 km near the equator. Covers the maximum inward
+# deviation introduced by the Visvalingam-Whyatt simplification
+# (zoom 6, threshold 100) used in simplifiedAdminPolygons.pl.
+TERRITORY_BUFFER_DEG = 0.01
 
 # ─── User Permission Cache ───────────────────────────────────────────────────
 
