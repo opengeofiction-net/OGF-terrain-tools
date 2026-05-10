@@ -831,7 +831,7 @@ sub buildAirlineRoutes()
 			{
 				$airlineName = $airline->{'name'};
 				$airlineOgfId = $airline->{'ogf:id'};
-				$airlineCountry = $airline->{'is_in:country'};
+				$airlineCountry = $airline->{'is_in:country:wiki'};
 				$airlineColor = $airline->{'color'} if defined $airline->{'color'};
 				last;
 			}
@@ -913,14 +913,14 @@ sub buildAirlineRoutes()
 					'origin_code' => $originCode,
 					'origin_name' => $originAirport->{'name'},
 					'origin_city' => $originAirport->{'serves'},
-					'origin_country' => $originAirport->{'is_in:country'},
+					'origin_country' => $originAirport->{'is_in:country:wiki'},
 					'origin_ogf:id' => $originAirport->{'ogf:id'},
 					'origin_lat' => $originAirport->{'lat'},
 					'origin_lon' => $originAirport->{'lon'},
 					'dest_code' => $destCode,
 					'dest_name' => $destAirport->{'name'},
 					'dest_city' => $destAirport->{'serves'},
-					'dest_country' => $destAirport->{'is_in:country'},
+					'dest_country' => $destAirport->{'is_in:country:wiki'},
 					'dest_ogf:id' => $destAirport->{'ogf:id'},
 					'dest_lat' => $destAirport->{'lat'},
 					'dest_lon' => $destAirport->{'lon'},
