@@ -41,6 +41,7 @@ import sys
 import time
 import re
 import math
+import hashlib
 import subprocess
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -917,7 +918,7 @@ def check_node_against_territories(lon, lat, territories, permissible, statuses)
             violations.append((ogf_id, status_info["status"], status_info["owner"], terr_type))
     return violations
 
-def patrol_user(username, user_id, territories, permissible, statuses, notified_users=None):
+def patrol_user(username, user_id, territories, permissible, statuses, territory_version, notified_users=None):
     """Run patrol for a single user. Returns a report dict."""
     if notified_users is None:
         notified_users = set()
@@ -944,8 +945,20 @@ def patrol_user(username, user_id, territories, permissible, statuses, notified_
     for i, cs in enumerate(changesets):
         print(f"  [{username}] Processing changeset {i+1}/{len(changesets)} (c{cs['id']})", end="\r", flush=True)
 
+        # Check for cached violation results for this changeset + territory version
+        cached = get_cached_violations(cs["id"], territory_version)
+        if cached is not None:
+            cs_violations, cs_territories, nodes_count = cached
+            report["violations"].extend(cs_violations)
+            report["territories_mapped"].update(cs_territories)
+            report["nodes_checked"] += nodes_count
+            continue
+
         nodes = fetch_changeset_nodes(cs["id"], user_id)
         report["nodes_checked"] += len(nodes)
+
+        cs_violations = []
+        cs_territories = set()
 
         for node in nodes:
             hits = check_node_against_territories(
@@ -982,7 +995,7 @@ def patrol_user(username, user_id, territories, permissible, statuses, notified_
                 if near_boundary:
                     continue
                 # Node is not inside any territory polygon (e.g., in the sea)
-                report["violations"].append({
+                v = {
                     "changeset_id": cs["id"],
                     "node_id": node["id"],
                     "lat": node["lat"],
@@ -991,14 +1004,17 @@ def patrol_user(username, user_id, territories, permissible, statuses, notified_
                     "territory_status": "outside territory",
                     "territory_owner": None,
                     "node_tags": node.get("tags", {}),
-                })
+                }
+                cs_violations.append(v)
+                report["violations"].append(v)
                 continue
 
             for terr_id, status, owner, terr_type in hits:
+                cs_territories.add(terr_id)
                 report["territories_mapped"].add(terr_id)
 
                 if terr_type == "restricted":
-                    report["violations"].append({
+                    v = {
                         "changeset_id": cs["id"],
                         "node_id": node["id"],
                         "lat": node["lat"],
@@ -1007,7 +1023,12 @@ def patrol_user(username, user_id, territories, permissible, statuses, notified_
                         "territory_status": status,
                         "territory_owner": owner,
                         "node_tags": node.get("tags", {}),
-                    })
+                    }
+                    cs_violations.append(v)
+                    report["violations"].append(v)
+
+        # Cache the violation results for this changeset
+        cache_violations(cs["id"], territory_version, cs_violations, cs_territories, len(nodes))
 
         time.sleep(0.1)
 
@@ -1259,16 +1280,30 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_changeset_user ON changeset_cache(user_id);
         CREATE INDEX IF NOT EXISTS idx_changeset_fetched ON changeset_cache(fetched_at);
+
+        CREATE TABLE IF NOT EXISTS changeset_violations (
+            changeset_id INTEGER NOT NULL,
+            territory_version TEXT NOT NULL,
+            violations_json TEXT NOT NULL,
+            territories_mapped_json TEXT NOT NULL,
+            nodes_count INTEGER NOT NULL,
+            cached_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (changeset_id, territory_version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_violations_version ON changeset_violations(territory_version);
     """)
     conn.commit()
-    
+
     # Clean up old cache entries (older than 60 days)
     c.execute("DELETE FROM changeset_cache WHERE fetched_at < datetime('now', '-60 days')")
-    deleted = c.rowcount
+    deleted_nodes = c.rowcount
+    c.execute("DELETE FROM changeset_violations WHERE cached_at < datetime('now', '-60 days')")
+    deleted_violations = c.rowcount
     conn.commit()
+    deleted = deleted_nodes + deleted_violations
     if deleted > 0:
-        print(f"  [CACHE] Cleaned up {deleted} old cache entries")
-    
+        print(f"  [CACHE] Cleaned up {deleted} old cache entries ({deleted_nodes} node + {deleted_violations} violation)")
+
     conn.close()
     return conn
 
@@ -1289,7 +1324,7 @@ def get_cached_changeset(changeset_id):
 
 def cache_changeset(changeset_id, user_id, nodes):
     """Store a changeset's nodes in the cache.
-    
+
     Args:
         changeset_id: The changeset ID
         user_id: The user who made the changeset
@@ -1300,6 +1335,54 @@ def cache_changeset(changeset_id, user_id, nodes):
     c.execute(
         "INSERT OR REPLACE INTO changeset_cache (changeset_id, user_id, nodes_json, fetched_at) VALUES (?, ?, ?, datetime('now'))",
         (changeset_id, user_id, json.dumps(nodes))
+    )
+    conn.commit()
+    conn.close()
+
+def compute_territory_version(territories, statuses, permissible):
+    """Compute a stable hash of territory data for cache invalidation.
+
+    Returns a short hex string that changes when any polygon shape,
+    hole, status, or permissible flag changes.
+    """
+    data = {
+        "territories": {
+            k: {
+                "outer_len": len(v["outer_ring"]),
+                "holes": [len(h) for h in v.get("holes", [])],
+            }
+            for k, v in sorted(territories.items())
+        },
+        "statuses": {k: v for k, v in sorted(statuses.items())},
+        "permissible": sorted(permissible),
+        "buffer": TERRITORY_BUFFER_DEG,
+    }
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
+
+def get_cached_violations(changeset_id, territory_version):
+    """Retrieve cached violation results for a changeset.
+
+    Returns (violations_list, territories_mapped_set, nodes_count) or None.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT violations_json, territories_mapped_json, nodes_count FROM changeset_violations WHERE changeset_id = ? AND territory_version = ?",
+        (changeset_id, territory_version)
+    )
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return json.loads(row[0]), set(json.loads(row[1])), row[2]
+    return None
+
+def cache_violations(changeset_id, territory_version, violations, territories_mapped, nodes_count):
+    """Store violation results for a changeset."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO changeset_violations (changeset_id, territory_version, violations_json, territories_mapped_json, nodes_count, cached_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+        (changeset_id, territory_version, json.dumps(violations), json.dumps(list(territories_mapped)), nodes_count)
     )
     conn.commit()
     conn.close()
@@ -1588,7 +1671,9 @@ def main():
     notified_users = load_notified_users()
     permitted = check_bot_permission()
     statuses_global = statuses  # For use in classify_user
+    territory_version = compute_territory_version(territories, statuses, permissible)
     print(f"  Permissible (blue) territories: {len(permissible)}")
+    print(f"  Territory version: {territory_version}")
 
     # Gate --notify and --scp behind bot control permission
     if not permitted:
@@ -1608,7 +1693,7 @@ def main():
     
     for i, user in enumerate(users):
         print(f"\n[{i+1}/{len(users)}] Patrolling {user['name']} (ID: {user['id']})...", flush=True)
-        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, notified_users)
+        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, territory_version, notified_users)
         all_reports.append(report)
         classification = classify_user(user, report)
         all_classifications.append(classification)
