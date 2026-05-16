@@ -203,25 +203,47 @@ def transform_wikitext(content, territory_map):
     # Order matters: object URLs first so their numeric IDs aren't consumed
     # by the broader map-URL pattern.
 
-    # Object URLs: way, relation, node, changeset
+    # Object URLs inside wikilinks: [https://.../way/ID text] → {{way|ID|name=text}}
+    # Must handle before bare URLs so the [ ] don't get stripped incompletely.
     for obj_type, tmpl in [
         ("changeset", "changeset"),
         ("way", "way"),
         ("relation", "relation"),
         ("node", "node"),
     ]:
-        pat = re.compile(
+        # Wikilink form: [URL text]
+        wikilink_pat = re.compile(
+            r"\[https?://(?:www\.)?opengeofiction\.net/"
+            + obj_type
+            + r"/(\d+)(?:[?#][^\s\]]*)?\s+"
+            r"([^\]]+)\]"
+        )
+
+        def _obj_wikilink_repl(m, _tmpl=tmpl, _obj_type=obj_type):
+            oid = m.group(1)
+            name = m.group(2).strip()
+            # Changeset template has no second param; others use unnamed param 2 for display text
+            if _tmpl == "changeset":
+                changes.append(f"{_obj_type} wikilink {oid} → {{{{{_tmpl}|{oid}}}}}")
+                return f"{{{{{_tmpl}|{oid}}}}}"
+            changes.append(f"{_obj_type} wikilink {oid} → {{{{{_tmpl}|{oid}|{name}}}}}")
+            return f"{{{{{_tmpl}|{oid}|{name}}}}}"
+
+        content = wikilink_pat.sub(_obj_wikilink_repl, content)
+
+        # Bare URL form (not inside [...])
+        bare_pat = re.compile(
             r"https?://(?:www\.)?opengeofiction\.net/"
             + obj_type
             + r"/(\d+)(?:[?#][^\s\]<>]*)?"
         )
 
-        def _obj_repl(m, _tmpl=tmpl):
+        def _obj_repl(m, _tmpl=tmpl, _obj_type=obj_type):
             oid = m.group(1)
-            changes.append(f"{obj_type} {oid} → {{{{{_tmpl}|{oid}}}}}")
+            changes.append(f"{_obj_type} {oid} → {{{{{_tmpl}|{oid}}}}}")
             return f"{{{{{_tmpl}|{oid}}}}}"
 
-        content = pat.sub(_obj_repl, content)
+        content = bare_pat.sub(_obj_repl, content)
 
     # Coord / map URLs:  #map=zoom/lat/lon[&...]
     # Two patterns: one for wikilinks [URL text], one for bare URLs.
@@ -229,7 +251,8 @@ def transform_wikitext(content, territory_map):
     coord_wikilink_pat = re.compile(
         r"\[https?://(?:www\.)?opengeofiction\.net/#map="
         r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
-        r"(?:[&?][^\]]*)?\s+([^\]]+)\]"
+        r"(?:[&?][^\s\]]*)?\s+"
+        r"([^\]]+)\]"
     )
 
     def _coord_wikilink_repl(m):
@@ -253,7 +276,7 @@ def transform_wikitext(content, territory_map):
 
     content = coord_pat.sub(_coord_repl, content)
 
-    # ---- Pass 2: Replace bare territory IDs ----------------------------
+    # ---- Pass 2: Replace bare territory IDs (first occurrence only) ----
     # Build alternation of all known territory IDs, longest first to avoid
     # partial matches (e.g. AN106 matching inside AN106a).
     sorted_ids = sorted(territory_map.keys(), key=len, reverse=True)
@@ -263,6 +286,8 @@ def transform_wikitext(content, territory_map):
 
     # Match territory IDs while skipping content inside {{...}} templates
     # (so already-templated references like {{relation|314512|AN106}} are left alone).
+    # Only the FIRST occurrence of each territory ID is replaced.
+    seen_ids = set()
     territory_re = re.compile(
         r"{{[^}]*}}"   # skip template spans
         r"|"
@@ -273,6 +298,9 @@ def transform_wikitext(content, territory_map):
         if m.group(0).startswith("{{"):
             return m.group(0)  # leave existing templates untouched
         tid = m.group(1)
+        if tid in seen_ids:
+            return m.group(0)  # only replace first occurrence
+        seen_ids.add(tid)
         rid = territory_map[tid]
         changes.append(f"territory ID {tid} → {{{{relation|{rid}|{tid}}}}}")
         return f"{{{{relation|{rid}|{tid}}}}}"
