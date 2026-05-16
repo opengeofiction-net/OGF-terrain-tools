@@ -6,12 +6,11 @@ and URLs with wiki templates.
 Run on a cron schedule to gradually clean up territory application pages.
 
 Patterns replaced:
-  - Bare territory IDs (AN106, UL07f) → {{relation|rel_id|territory_id}}
-  - Map URLs (opengeofiction.net/#map=Z/LAT/LON...) → {{coord|lat|lon|zoom=Z}}
-  - Way URLs → {{way|id}}
-  - Relation URLs → {{relation|id}}
-  - Node URLs → {{node|id}}
-  - Changeset URLs → {{changeset|id}}
+  - Bare territory IDs (AN106, UL07f) → {{relation|rel_id|territory_id}}  (first occurrence only)
+  - OGF map URLs → {{coord|latitude=|longitude=|zoom=}}
+  - OSM map URLs → {{coordosm|latitude=|longitude=|zoom=}}
+  - OGF way/relation/node/changeset URLs → respective templates
+  - Wikilink forms [URL display_text] preserve display text in template params
 
 Credentials: ~/ogf-user.env (USERNAME, PASSWORD)
 """
@@ -275,6 +274,77 @@ def transform_wikitext(content, territory_map):
         return f"{{{{coord|latitude={lat}|longitude={lon}|zoom={zoom}}}}}"
 
     content = coord_pat.sub(_coord_repl, content)
+
+    # ---- Pass 1b: Replace openstreetmap.org URLs → {{coordosm}} ----------
+    # OSM #map= coordinate links use {{coordosm}} (same params as {{coord}}).
+    # OSM object URLs (way/relation/node/changeset) have no wiki templates
+    # and are left as-is, EXCEPT when they also carry a #map= fragment —
+    # those are converted to {{coordosm}} since the coordinates are the useful part.
+
+    # OSM object+map wikilinks: [/relation/ID#map=Z/LAT/LON text] → {{coordosm}}
+    # Must come before plain coordosm patterns so the object URL regex doesn't
+    # consume these first. The object ID is silently dropped (no template for it).
+    for obj_type in ("changeset", "way", "relation", "node"):
+        osm_obj_map_wikilink = re.compile(
+            r"\[https?://(?:www\.)?openstreetmap\.org/"
+            + obj_type
+            + r"/\d+#map="
+            r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+            r"(?:[&?][^\s\]]*)?\s+"
+            r"([^\]]+)\]"
+        )
+
+        def _osm_obj_map_repl(m):
+            zoom, lat, lon, name = m.group(1), m.group(2), m.group(3), m.group(4).strip()
+            changes.append(f"osm object+map link → {{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}|name={name}}}")
+            return f"{{{{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}|name={name}}}}}"
+
+        content = osm_obj_map_wikilink.sub(_osm_obj_map_repl, content)
+
+        # Bare OSM object+map URLs (not inside []) → {{coordosm}} without name
+        osm_obj_map_bare = re.compile(
+            r"https?://(?:www\.)?openstreetmap\.org/"
+            + obj_type
+            + r"/\d+#map="
+            r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+            r"(?:[&?][^\s\]<>]*)?"
+        )
+
+        def _osm_obj_map_bare_repl(m):
+            zoom, lat, lon = m.group(1), m.group(2), m.group(3)
+            changes.append(f"osm object+map link → {{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}}}")
+            return f"{{{{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}}}}}"
+
+        content = osm_obj_map_bare.sub(_osm_obj_map_bare_repl, content)
+
+    # Pure OSM #map= wikilinks: [https://...openstreetmap.org/#map=Z/LAT/LON text]
+    coordosm_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?openstreetmap\.org/#map="
+        r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+        r"(?:[&?][^\s\]]*)?\s+"
+        r"([^\]]+)\]"
+    )
+
+    def _coordosm_wikilink_repl(m):
+        zoom, lat, lon, name = m.group(1), m.group(2), m.group(3), m.group(4).strip()
+        changes.append(f"osm map link → {{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}|name={name}}}")
+        return f"{{{{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}|name={name}}}}}"
+
+    content = coordosm_wikilink_pat.sub(_coordosm_wikilink_repl, content)
+
+    # Standalone OSM coord URLs (not inside [])
+    coordosm_pat = re.compile(
+        r"https?://(?:www\.)?openstreetmap\.org/#map="
+        r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+        r"(?:[&?][^\s\]<>]*)?"
+    )
+
+    def _coordosm_repl(m):
+        zoom, lat, lon = m.group(1), m.group(2), m.group(3)
+        changes.append(f"osm map link → {{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}}}")
+        return f"{{{{coordosm|latitude={lat}|longitude={lon}|zoom={zoom}}}}}"
+
+    content = coordosm_pat.sub(_coordosm_repl, content)
 
     # ---- Pass 2: Replace bare territory IDs (first occurrence only) ----
     # Build alternation of all known territory IDs, longest first to avoid
