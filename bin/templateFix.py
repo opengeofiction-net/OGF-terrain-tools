@@ -39,6 +39,16 @@ BOT_CONTROL_URL = "https://wiki.opengeofiction.net/index.php/User:Brothie?action
 USER_AGENT = "Brothie/1.0 (OGF Template Bot)"
 REFERER = "https://opengeofiction.net/"
 CREDENTIALS_PATH = Path.home() / "ogf-user.env"
+VAR_DIR = Path(__file__).parent.parent / "var"
+
+
+def write_daily_book(entry):
+    """Append a JSONL entry to the daily book for today's date."""
+    VAR_DIR.mkdir(parents=True, exist_ok=True)
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    path = VAR_DIR / f"daily-book-{today}.ndjson"
+    with open(path, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +467,35 @@ def transform_wikitext(content, territory_map):
 
     content = territory_re.sub(_tid_repl, content)
 
-    return content, changes
+    # ---- Pass 3: Find orphan URLs (bare OGF/OSM links not converted) ----
+    # These are URLs the script did not know how to handle.  Reporting them
+    # helps identify new patterns that could be templatized in future.
+    orphans = find_orphan_urls(content)
+
+    return content, changes, orphans
+
+
+def find_orphan_urls(content):
+    """Find bare OGF/OSM URLs not inside {{...}} template invocations.
+
+    After all replacements, any remaining opengeofiction.net or
+    openstreetmap.org URL that is NOT inside a {{...}} template is
+    considered an orphan — a link the script could not convert.
+    """
+    orphan_re = re.compile(
+        r"\{\{[^}]*\}\}"                     # skip template spans
+        r"|"
+        r"(https?://(?:www\.)?(?:opengeofiction\.net|openstreetmap\.org)/"
+        r"[^\s\]<>}]+)"
+    )
+    seen = set()
+    orphans = []
+    for m in orphan_re.finditer(content):
+        url = m.group(1)
+        if url and url not in seen:
+            seen.add(url)
+            orphans.append(url)
+    return orphans
 
 
 # --------------------------------------------------------------------------
@@ -547,7 +585,45 @@ def main():
         sys.exit(1)
     print(f"Page ID {pageid}, {len(content)} characters")
 
-    new_content, changes = transform_wikitext(content, territory_map)
+    new_content, changes, orphans = transform_wikitext(content, territory_map)
+
+    # Classify orphan URLs by type for the log
+    source = "category" if minute < 30 else "random"
+    orphan_types = {}
+    for url in orphans:
+        if "openstreetmap.org" in url:
+            kind = "osm"
+        elif "/user/" in url:
+            kind = "ogf-user"
+        elif "/way/" in url or "/relation/" in url or "/node/" in url or "/changeset/" in url:
+            kind = "ogf-object"
+        elif "/#map=" in url or "/map=" in url:
+            kind = "ogf-map"
+        else:
+            kind = "ogf-other"
+        orphan_types.setdefault(kind, []).append(url)
+
+    # Always write to the daily book (even if no changes, orphans are valuable)
+    entry = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "script": "templateFix",
+        "page": title,
+        "pageid": pageid,
+        "source": source,
+        "edits": len(changes),
+        "orphan_count": len(orphans),
+        "orphan_types": {k: len(v) for k, v in orphan_types.items()},
+        "orphans": orphans,
+        "changes": changes,
+    }
+    if dry_run:
+        entry["dry_run"] = True
+    write_daily_book(entry)
+
+    if orphans:
+        print(f"\n{len(orphans)} orphan URL(s) found (not converted):")
+        for url in orphans:
+            print(f"  {url}")
 
     if not changes:
         print("No replacements needed — exiting")
