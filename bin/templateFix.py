@@ -10,6 +10,7 @@ Patterns replaced:
   - OGF map URLs → {{coord|latitude=|longitude=|zoom=}}
   - OSM map URLs → {{coordosm|latitude=|longitude=|zoom=}}
   - OGF way/relation/node/changeset URLs → respective templates
+  - OGF user profile URLs → {{OGF user|username}} or {{OGF user|username|history}}
   - Wikilink forms [URL display_text] preserve display text in template params
 
 Credentials: ~/ogf-user.env (USERNAME, PASSWORD)
@@ -263,6 +264,65 @@ def transform_wikitext(content, territory_map):
             return f"{{{{{_tmpl}|{oid}}}}}"
 
         content = bare_pat.sub(_obj_repl, content)
+
+    # OGF user profile URLs: opengeofiction.net/user/NAME[/history]
+    # {{OGF user|NAME}} or {{OGF user|NAME|history}}
+    # Username may contain spaces, %20, or plus signs.
+
+    # Wikilink form first: [https://.../user/NAME(/history)? TEXT] → {{OGF user|NAME}}
+    # Display text is dropped since the template generates it from the username.
+    user_wikilink_history_pat = re.compile(
+        r"\[https?://(?:www\.)?opengeofiction\.net/user/([^/]+?)/history"
+        r"(?:[?#][^\s\]]*)?\s+"
+        r"[^\]]*\]"
+    )
+    user_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?opengeofiction\.net/user/([^/>?\s#]+)"
+        r"(?:[?#][^\s\]]*)?\s+"
+        r"[^\]]*\]"
+    )
+
+    def _user_wikilink_repl(m, history=False):
+        # Decode %20 and + to spaces for the template parameter
+        raw_name = m.group(1)
+        name = raw_name.replace("%20", " ").replace("+", " ")
+        if history:
+            changes.append(f"user wikilink {raw_name}/history → {{{{OGF user|{name}|history}}}}")
+            return f"{{{{OGF user|{name}|history}}}}"
+        changes.append(f"user wikilink {raw_name} → {{{{OGF user|{name}}}}}")
+        return f"{{{{OGF user|{name}}}}}"
+
+    # /history wikilinks must be matched first (before plain ones consume the url)
+    content = user_wikilink_history_pat.sub(
+        lambda m: _user_wikilink_repl(m, history=True), content
+    )
+    content = user_wikilink_pat.sub(
+        lambda m: _user_wikilink_repl(m, history=False), content
+    )
+
+    # Bare URL form (not inside [...])
+    user_bare_history_pat = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/user/([^/?\s]+)/history(?:[?#][^\s\]<>]*)?"
+    )
+    user_bare_pat = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/user/([^/?\s#]+)(?:[?#][^\s\]<>]*)?"
+    )
+
+    def _user_bare_repl(m, history=False):
+        raw_name = m.group(1)
+        name = raw_name.replace("%20", " ").replace("+", " ")
+        if history:
+            changes.append(f"user URL {raw_name}/history → {{{{OGF user|{name}|history}}}}")
+            return f"{{{{OGF user|{name}|history}}}}"
+        changes.append(f"user URL {raw_name} → {{{{OGF user|{name}}}}}")
+        return f"{{{{OGF user|{name}}}}}"
+
+    content = user_bare_history_pat.sub(
+        lambda m: _user_bare_repl(m, history=True), content
+    )
+    content = user_bare_pat.sub(
+        lambda m: _user_bare_repl(m, history=False), content
+    )
 
     # Coord / map URLs:  #map=zoom/lat/lon[&...]
     # Two patterns: one for wikilinks [URL text], one for bare URLs.
