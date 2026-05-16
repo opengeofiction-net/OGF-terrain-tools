@@ -15,6 +15,7 @@ Patterns replaced:
 Credentials: ~/ogf-user.env (USERNAME, PASSWORD)
 """
 
+import datetime
 import json
 import random
 import re
@@ -129,6 +130,25 @@ def get_category_pages(opener):
     if not data:
         return []
     return [m["title"] for m in data.get("query", {}).get("categorymembers", [])]
+
+
+def get_random_page(opener):
+    """Pick a random wiki page, excluding Template, Admin, OpenGeofiction, and Help namespaces."""
+    # Allowed namespaces: main (0), Talk (1), User (2), User talk (3), File (6),
+    # File talk (7), MediaWiki (8), Category (14), Forum (110), Collab (3002), Index (3004)
+    # Excluded: Template (10), OpenGeofiction (4), Help (12), Admin (3006), and their talk pages
+    allowed_ns = "0|1|2|3|6|7|8|14|110|3002|3004"
+    data = api_get(opener, {
+        "action": "query",
+        "list": "random",
+        "rnnamespace": allowed_ns,
+        "rnlimit": "1",
+        "format": "json",
+    })
+    if not data:
+        return None
+    pages = data.get("query", {}).get("random", [])
+    return pages[0]["title"] if pages else None
 
 
 def get_page_content(opener, title):
@@ -442,13 +462,23 @@ def main():
         print("Bot permission denied, exiting")
         sys.exit(1)
 
-    pages = get_category_pages(opener)
-    if not pages:
-        print("Error: No pages found in Category:Territory application")
-        sys.exit(1)
-    print(f"Found {len(pages)} pages in category")
-
-    title = random.choice(pages)
+    # Decide page source based on current minute:
+    #   minute < 30 → pick from Category:Territory application
+    #   minute >= 30 → pick a random page (excluding Template/Admin/OpenGeofiction/Help)
+    minute = datetime.datetime.now(datetime.timezone.utc).minute
+    if minute < 30:
+        pages = get_category_pages(opener)
+        if not pages:
+            print("Error: No pages found in Category:Territory application")
+            sys.exit(1)
+        title = random.choice(pages)
+        print(f"Found {len(pages)} pages in category")
+    else:
+        title = get_random_page(opener)
+        if not title:
+            print("Error: Could not get random page")
+            sys.exit(1)
+        print(f"Random page selected")
     print(f"Selected: {title}")
 
     content, pageid = get_page_content(opener, title)
