@@ -910,8 +910,12 @@ def check_node_against_territories(lon, lat, territories, permissible, statuses)
         if not terr["outer_ring"]:
             continue
         # Skip outline territories - they are already covered by other territories
+        # Skip territories with no status entry (timezone boundaries, etc.) -
+        # these are not real territories in the admin sense.
         status_info = statuses.get(ogf_id, {"status": "unknown", "owner": None})
         if status_info["status"] == "outline":
+            continue
+        if status_info["status"] == "unknown":
             continue
         if point_in_polygon_with_holes(lon, lat, terr["outer_ring"], terr["holes"]):
             terr_type = "permissible" if ogf_id in permissible else "restricted"
@@ -968,11 +972,15 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
 
             if not hits:
                 # Node is not inside any territory polygon (e.g., in the sea).
-                # Check if it's within the boundary buffer of any territory
-                # before flagging it as a violation.
+                # Check if it's within the boundary buffer of any real territory
+                # (not unknown/outline) before flagging it as a violation.
                 near_boundary = False
                 for ogf_id, terr in territories.items():
                     if not terr["outer_ring"]:
+                        continue
+                    # Skip unknown territories (timezone boundaries, etc.) and outlines
+                    si = statuses.get(ogf_id, {"status": "unknown"})
+                    if si["status"] in ("unknown", "outline"):
                         continue
                     if point_near_polygon(
                         node["lon"], node["lat"],
@@ -1339,13 +1347,16 @@ def cache_changeset(changeset_id, user_id, nodes):
     conn.commit()
     conn.close()
 
+CACHE_LOGIC_VERSION = "v2"  # Bump when violation detection logic changes (invalidates cache)
+
 def compute_territory_version(territories, statuses, permissible):
     """Compute a stable hash of territory data for cache invalidation.
 
     Returns a short hex string that changes when any polygon shape,
-    hole, status, or permissible flag changes.
+    hole, status, permissible flag, or detection logic changes.
     """
     data = {
+        "version": CACHE_LOGIC_VERSION,
         "territories": {
             k: {
                 "outer_len": len(v["outer_ring"]),
