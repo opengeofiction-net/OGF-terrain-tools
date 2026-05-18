@@ -8,6 +8,7 @@ Run on a cron schedule to gradually clean up territory application pages.
 Patterns replaced:
   - Bare territory IDs (AN106, UL07f) → {{relation|rel_id|territory_id}}  (first occurrence only)
   - OGF map URLs → {{coord|latitude=|longitude=|zoom=}}
+  - OGF edit URLs (/edit#map=...) → {{coord|latitude=|longitude=|zoom=}}
   - OSM map URLs → {{coordosm|latitude=|longitude=|zoom=}}
   - OGF way/relation/node/changeset URLs → respective templates
   - OGF user profile URLs → {{OGF user|username}} or {{OGF user|username|history}}
@@ -364,6 +365,39 @@ def transform_wikitext(content, territory_map):
         return f"{{{{coord|latitude={lat}|longitude={lon}|zoom={zoom}}}}}"
 
     content = coord_pat.sub(_coord_repl, content)
+
+    # ---- Pass 1a: Replace OGF edit URLs → {{coord}} ---------------------
+    # Edit links like https://opengeofiction.net/edit#map=18/-11.86/170.58
+    # carry coordinate fragments and should be converted to {{coord}}.
+    # Wikilink form: [URL display text] → {{coord|...|name=display text}}
+    # Bare form: URL → {{coord|...}}
+
+    edit_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?opengeofiction\.net/edit#map="
+        r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+        r"(?:[&?][^\s\]]*)?\s+"
+        r"([^\]]+)\]"
+    )
+
+    def _edit_wikilink_repl(m):
+        zoom, lat, lon, name = m.group(1), m.group(2), m.group(3), m.group(4).strip()
+        changes.append(f"edit link → {{coord|latitude={lat}|longitude={lon}|zoom={zoom}|name={name}}}")
+        return f"{{{{coord|latitude={lat}|longitude={lon}|zoom={zoom}|name={name}}}}}"
+
+    content = edit_wikilink_pat.sub(_edit_wikilink_repl, content)
+
+    edit_bare_pat = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/edit#map="
+        r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+        r"(?:[&?][^\s\]<>]*)?"
+    )
+
+    def _edit_bare_repl(m):
+        zoom, lat, lon = m.group(1), m.group(2), m.group(3)
+        changes.append(f"edit link → {{coord|latitude={lat}|longitude={lon}|zoom={zoom}}}")
+        return f"{{{{coord|latitude={lat}|longitude={lon}|zoom={zoom}}}}}"
+
+    content = edit_bare_pat.sub(_edit_bare_repl, content)
 
     # ---- Pass 1b: Replace openstreetmap.org URLs → {{coordosm}} ----------
     # OSM #map= coordinate links use {{coordosm}} (same params as {{coord}}).
