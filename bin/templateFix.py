@@ -515,6 +515,11 @@ def find_orphan_urls(content):
     After all replacements, any remaining opengeofiction.net or
     openstreetmap.org URL that is NOT inside a {{...}} template is
     considered an orphan — a link the script could not convert.
+
+    OSM bare object URLs (openstreetmap.org/(way|relation|node|changeset)/ID
+    without #map=) are intentionally left unconverted (no templates exist for
+    real OSM objects) and are silently filtered out — they are not true
+    orphans, just genuine cross-wiki references.
     """
     orphan_re = re.compile(
         r"\{\{[^}]*\}\}"                     # skip template spans
@@ -522,13 +527,22 @@ def find_orphan_urls(content):
         r"(https?://(?:www\.)?(?:opengeofiction\.net|openstreetmap\.org)/"
         r"[^\s\]<>}]+)"
     )
+    # OSM object URLs (no #map=) have no template to convert to — ignore them
+    osm_object_re = re.compile(
+        r"https?://(?:www\.)?openstreetmap\.org/"
+        r"(?:way|relation|node|changeset)/\d+"
+    )
     seen = set()
     orphans = []
     for m in orphan_re.finditer(content):
         url = m.group(1)
-        if url and url not in seen:
-            seen.add(url)
-            orphans.append(url)
+        if not url or url in seen:
+            continue
+        # Skip OSM bare object URLs — they are genuine cross-wiki references
+        if osm_object_re.match(url):
+            continue
+        seen.add(url)
+        orphans.append(url)
     return orphans
 
 
