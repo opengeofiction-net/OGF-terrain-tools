@@ -175,6 +175,86 @@ def aggregate(entries):
     return dict(by_script)
 
 
+def track_user_violation_growth(today_date_str, up_entries):
+    """Compare today's patrol users against previous days for violation growth.
+
+    Returns a dict with 'growing', 'new_users', and 'stable_count',
+    or None if no user-level data is available (old-format entries).
+    """
+    # Step 1: Build today's user profiles (max violation per user across all runs)
+    today_users = {}
+    for e in up_entries:
+        for u in e.get("users", []):
+            name = u["name"]
+            if name not in today_users or u["violations"] > today_users[name]["violations"]:
+                today_users[name] = {
+                    "violations": u["violations"],
+                    "classification": u.get("classification", ""),
+                    "notified": u.get("notified", False),
+                }
+
+    if not today_users:
+        return None  # Old-format entries without user data
+
+    # Step 2: Load previous days' patrol entries and build historical profiles
+    today = datetime.datetime.strptime(today_date_str, "%Y-%m-%d").date()
+    historical = {}  # name -> {peak_violations, peak_day, days_flagged}
+
+    for days_back in range(1, 8):
+        prev_date = today - datetime.timedelta(days=days_back)
+        prev_str = prev_date.strftime("%Y-%m-%d")
+        prev_entries = load_daily_book(prev_str)
+        for e in prev_entries:
+            if e.get("script") != "userPatrol":
+                continue
+            for u in e.get("users", []):
+                name = u["name"]
+                if name not in historical:
+                    historical[name] = {
+                        "peak_violations": 0,
+                        "peak_day": "",
+                        "days_flagged": set(),
+                    }
+                historical[name]["days_flagged"].add(prev_str)
+                if u["violations"] > historical[name]["peak_violations"]:
+                    historical[name]["peak_violations"] = u["violations"]
+                    historical[name]["peak_day"] = prev_str
+
+    # Step 3: Classify today's users
+    growing = []
+    new_users = []
+    stable_count = 0
+
+    for name, info in sorted(today_users.items(), key=lambda x: -x[1]["violations"]):
+        today_v = info["violations"]
+        if name in historical:
+            hist = historical[name]
+            peak = hist["peak_violations"]
+            days_flagged = len(hist["days_flagged"])
+
+            if today_v > peak:
+                growth = today_v - peak
+                growing.append({
+                    "name": name,
+                    "previous": peak,
+                    "prev_day": hist["peak_day"],
+                    "today": today_v,
+                    "growth": growth,
+                    "classification": info["classification"],
+                    "days_active": days_flagged + 1,
+                })
+            else:
+                stable_count += 1
+        else:
+            new_users.append({"name": name, **info})
+
+    return {
+        "growing": growing,
+        "new_users": new_users,
+        "stable_count": stable_count,
+    }
+
+
 def format_summary(date_str, by_script):
     """Format a human-readable summary for Discord."""
     lines = [f"== {date_str} =="]
@@ -251,6 +331,31 @@ def format_summary(date_str, by_script):
         if class_totals:
             for cls, count in class_totals.most_common():
                 lines.append(f"  * {cls}: {count}")
+
+        # Violation growth tracking
+        growth_data = track_user_violation_growth(date_str, up_entries)
+        if growth_data:
+            if growth_data["growing"]:
+                lines.append("")
+                lines.append("**Users with growing violations:**")
+                lines.append("| User | Previous | Today | Growth | Classification | Days active |")
+                lines.append("|------|----------|-------|--------|----------------|-------------|")
+                for u in growth_data["growing"]:
+                    prev_str = f"{u['previous']} ({u['prev_day']})" if u['prev_day'] else str(u['previous'])
+                    lines.append(
+                        f"| {u['name']} | {prev_str} | {u['today']} "
+                        f"| +{u['growth']} | {u['classification']} | {u['days_active']}d |"
+                    )
+            if growth_data["new_users"]:
+                new_details = ", ".join(
+                    f"{u['name']} ({u['classification']}, {u['violations']} violations)"
+                    for u in growth_data["new_users"]
+                )
+                lines.append("")
+                lines.append(f"**New users flagged:** {new_details}")
+            if growth_data["stable_count"] > 0:
+                lines.append("")
+                lines.append(f"**Stable users:** {growth_data['stable_count']} — violation counts unchanged")
     else:
         lines.append("")
         lines.append("=== userPatrol ===")
