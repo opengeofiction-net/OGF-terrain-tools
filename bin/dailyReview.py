@@ -337,7 +337,7 @@ def format_summary(date_str, by_script):
         if growth_data:
             if growth_data["growing"]:
                 lines.append("")
-                lines.append("**Users with growing violations:**")
+                lines.append("'''Users with growing violations:'''")
                 lines.append("| User | Previous | Today | Growth | Classification | Days active |")
                 lines.append("|------|----------|-------|--------|----------------|-------------|")
                 for u in growth_data["growing"]:
@@ -352,10 +352,10 @@ def format_summary(date_str, by_script):
                     for u in growth_data["new_users"]
                 )
                 lines.append("")
-                lines.append(f"**New users flagged:** {new_details}")
+                lines.append(f"'''New users flagged:''' {new_details}")
             if growth_data["stable_count"] > 0:
                 lines.append("")
-                lines.append(f"**Stable users:** {growth_data['stable_count']} — violation counts unchanged")
+                lines.append(f"'''Stable users:''' {growth_data['stable_count']} — violation counts unchanged")
     else:
         lines.append("")
         lines.append("=== userPatrol ===")
