@@ -305,11 +305,11 @@ def format_summary(date_str, by_script):
         lines.append(f"* {edits_made} pages edited with {total_edits} total replacements")
         if change_types:
             for ct, count in change_types.most_common():
-                lines.append(f"  * {ct}: {count}")
+                lines.append(f"** {ct}: {count}")
         if total_orphan_urls:
             lines.append(f"* {total_orphan_urls} orphan URL(s) on {len(orphan_pages)} page(s)")
             for ot, count in orphan_types.most_common():
-                lines.append(f"  * {ot}: {count}")
+                lines.append(f"** {ot}: {count}")
     else:
         lines.append("")
         lines.append("=== templateFix ===")
@@ -330,7 +330,7 @@ def format_summary(date_str, by_script):
         lines.append(f"* {total_notified} notifications sent")
         if class_totals:
             for cls, count in class_totals.most_common():
-                lines.append(f"  * {cls}: {count}")
+                lines.append(f"** {cls}: {count}")
 
         # Violation growth tracking
         growth_data = track_user_violation_growth(date_str, up_entries)
