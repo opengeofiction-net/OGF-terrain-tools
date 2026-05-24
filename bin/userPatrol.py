@@ -18,8 +18,9 @@ Usage:
 
 JSON Output (--json):
     - var/new_users_patrol.json: Detailed report with full violation data (flagged users only)
+      Fields: username, user_id, profile, classification, confidence, score, reasons, latest, changesets_fetched, nodes_checked, territories_mapped, violations_count, notified, notes, territory_violations
     - var/new_users_patrol_summary.json: Flat summary matching new_users.json format (flagged users only)
-      Fields: name, profile, block_status, classification, violations, notified, notes
+      Fields: name, profile, block_status, classification, latest, violations, notified, notes
 
 SCP Output (--scp <target>):
     Automatically enables --json and copies both JSON files to the specified
@@ -1519,6 +1520,7 @@ def generate_json_output(all_reports, all_classifications, user_info):
             "confidence": cls["confidence"],
             "score": cls["score"],
             "reasons": cls["reasons"],
+            "latest": u_info.get("latest", ""),
             "changesets_fetched": report["changesets_fetched"],
             "nodes_checked": report["nodes_checked"],
             "territories_mapped": list(report["territories_mapped"]),
@@ -1559,7 +1561,7 @@ def generate_summary_json(all_reports, all_classifications, user_info):
     """Generate flat summary JSON matching new_users.json format.
     
     Only includes flagged users (violations or suspicious/needs_review/likely_vandal).
-    Output fields: name, profile, block_status, classification, violations, notified, notes
+    Output fields: name, profile, block_status, classification, latest, violations, notified, notes
     """
     summary = []
     
@@ -1580,6 +1582,7 @@ def generate_summary_json(all_reports, all_classifications, user_info):
             "profile": f"https://opengeofiction.net/user/{username_encoded}",
             "block_status": u_info.get("block_status", ""),
             "classification": cls["classification"],
+            "latest": u_info.get("latest", ""),
             "violations": len(report["violations"]),
             "notified": get_notified_status(report, cls),
             "notes": notes_str,
