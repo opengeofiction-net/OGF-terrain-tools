@@ -13,6 +13,7 @@ Patterns replaced:
   - OGF way/relation/node/changeset URLs → respective templates
   - OGF user profile URLs → {{OGF user|username}} or {{OGF user|username|history}}
   - Wikilink forms [URL display_text] preserve display text in template params
+  - {{#multimaps:...}} blocks are protected — URLs inside them are never modified
 
 Credentials: ~/ogf-user.env (USERNAME, PASSWORD)
 """
@@ -228,6 +229,54 @@ def load_territory_lookup():
 def transform_wikitext(content, territory_map):
     """Apply all template replacements. Returns (new_content, list_of_change_descriptions)."""
     changes = []
+
+    # ---- Pass 0: Protect {{#multimaps:...}} blocks from processing ----
+    # These parser functions contain embedded HTML with OGF URLs that must
+    # NOT be templated — replacing them breaks the multimaps feature.
+    protected = {}
+
+    def _protect_multimaps(text):
+        """Replace {{#multimaps:...}} spans with placeholders."""
+        nonlocal protected
+        protected = {}
+        result = []
+        i = 0
+        placeholder_idx = 0
+        while i < len(text):
+            # Find next {{#multimaps:
+            mm_pos = text.find("{{#multimaps:", i)
+            if mm_pos == -1:
+                result.append(text[i:])
+                break
+            result.append(text[i:mm_pos])
+            # Count braces to find matching }}
+            brace_depth = 0
+            j = mm_pos
+            while j < len(text):
+                if text[j:j+2] == "{{":
+                    brace_depth += 1
+                    j += 1
+                elif text[j:j+2] == "}}":
+                    brace_depth -= 1
+                    if brace_depth == 0:
+                        full_block = text[mm_pos:j+2]
+                        ph = f"__MMPROTECT_{placeholder_idx}__"
+                        protected[ph] = full_block
+                        result.append(ph)
+                        placeholder_idx += 1
+                        j += 2
+                        break
+                    j += 1
+                else:
+                    j += 1
+            else:
+                # Unclosed — append rest as-is to avoid data loss
+                result.append(text[mm_pos:])
+                break
+            i = j
+        return "".join(result)
+
+    content = _protect_multimaps(content)
 
     # ---- Pass 1: Replace opengeofiction.net object/map URLs ------------
     # Map URL:  #map=Z/LAT/LON[&...]
@@ -501,7 +550,11 @@ def transform_wikitext(content, territory_map):
 
     content = territory_re.sub(_tid_repl, content)
 
-    # ---- Pass 3: Find orphan URLs (bare OGF/OSM links not converted) ----
+    # ---- Pass 3: Restore protected {{#multimaps:...}} blocks ------------
+    for ph, original in protected.items():
+        content = content.replace(ph, original)
+
+    # ---- Pass 4: Find orphan URLs (bare OGF/OSM links not converted) ----
     # These are URLs the script did not know how to handle.  Reporting them
     # helps identify new patterns that could be templatized in future.
     orphans = find_orphan_urls(content)
