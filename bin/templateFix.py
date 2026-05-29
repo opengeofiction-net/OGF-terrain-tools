@@ -12,6 +12,7 @@ Patterns replaced:
   - OSM map URLs → {{coordosm|latitude=|longitude=|zoom=}}
   - OGF way/relation/node/changeset URLs → respective templates
   - OGF user profile URLs → {{OGF user|username}} or {{OGF user|username|history}}
+  - OGF message/new URLs → {{OGF user|username|msg}} or {{OGF user|username|msg|text=...}}
   - Wikilink forms [URL display_text] preserve display text in template params
   - {{#multimaps:...}} blocks are protected — URLs inside them are never modified
 
@@ -383,6 +384,42 @@ def transform_wikitext(content, territory_map):
     content = user_bare_pat.sub(
         lambda m: _user_bare_repl(m, history=False), content
     )
+
+    # OGF message/new URLs: opengeofiction.net/message/new/NAME
+    # {{OGF user|NAME|msg}} or {{OGF user|NAME|msg|text=display text}}
+    # Username may contain URL-encoded characters (%20, +, etc.)
+
+    # Wikilink form first: [https://.../message/new/NAME TEXT]
+    msg_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?opengeofiction\.net/message/new/"
+        r"([^\]/\s?#]+)"
+        r"(?:[?#][^\s\]]*)?\s+"
+        r"([^\]]+)\]"
+    )
+
+    def _msg_wikilink_repl(m):
+        raw_name = m.group(1)
+        name = raw_name.replace("%20", " ").replace("+", " ")
+        display_text = m.group(2).strip()
+        changes.append(f"msg wikilink {raw_name} → {{{{OGF user|{name}|msg|text={display_text}}}}}")
+        return f"{{{{OGF user|{name}|msg|text={display_text}}}}}"
+
+    content = msg_wikilink_pat.sub(_msg_wikilink_repl, content)
+
+    # Bare URL form (not inside [...])
+    msg_bare_pat = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/message/new/"
+        r"([^\]/<\s?#]+)"
+        r"(?:[?#][^\s\]<>]*)?"
+    )
+
+    def _msg_bare_repl(m):
+        raw_name = m.group(1)
+        name = raw_name.replace("%20", " ").replace("+", " ")
+        changes.append(f"msg URL {raw_name} → {{{{OGF user|{name}|msg}}}}")
+        return f"{{{{OGF user|{name}|msg}}}}"
+
+    content = msg_bare_pat.sub(_msg_bare_repl, content)
 
     # Coord / map URLs:  #map=zoom/lat/lon[&...]
     # Two patterns: one for wikilinks [URL text], one for bare URLs.
