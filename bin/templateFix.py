@@ -24,6 +24,7 @@ import json
 import random
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -847,6 +848,10 @@ def main():
             print(f"Successfully updated {title}")
         else:
             print(f"Failed to save edit for {title}")
+
+        # Pause between pages in batch mode to avoid hammering the API
+        if len(titles) > 1 and idx < len(titles) - 1:
+            time.sleep(1)
 
     # Summary for batch mode
     if len(titles) > 1:
