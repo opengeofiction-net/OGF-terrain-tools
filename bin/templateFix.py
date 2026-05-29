@@ -670,6 +670,25 @@ def check_bot_permission():
 def main():
     dry_run = "--dry-run" in sys.argv
 
+    # --pages FILE: read page titles from FILE (one per line) and process all
+    pages_file = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--pages" and i + 1 < len(sys.argv):
+            pages_file = sys.argv[i + 1]
+            break
+    page_list = []
+    if pages_file:
+        try:
+            with open(pages_file) as f:
+                page_list = [line.strip() for line in f if line.strip()]
+        except FileNotFoundError:
+            print(f"Error: Pages file not found: {pages_file}")
+            sys.exit(1)
+        if not page_list:
+            print(f"Error: No pages found in {pages_file}")
+            sys.exit(1)
+        print(f"Loaded {len(page_list)} page(s) from {pages_file}")
+
     creds = load_credentials()
     username = creds.get("USERNAME", "")
     password = creds.get("PASSWORD", "")
@@ -694,94 +713,121 @@ def main():
         sys.exit(1)
     print("Logged in to wiki")
 
-    if not check_bot_permission():
+    if not check_bot_permission() and not dry_run:
         print("Bot permission denied, exiting")
         sys.exit(1)
 
-    # Decide page source based on current minute:
-    #   minute < 30 → pick from Category:Territory application
-    #   minute >= 30 → pick a random page (excluding Template/Admin/OpenGeofiction/Help)
-    minute = datetime.datetime.now(datetime.timezone.utc).minute
-    if minute < 30:
-        pages = get_category_pages(opener)
-        if not pages:
-            print("Error: No pages found in Category:Territory application")
-            sys.exit(1)
-        title = random.choice(pages)
-        print(f"Found {len(pages)} pages in category")
+    # Build the list of titles to process
+    if page_list:
+        titles = page_list
     else:
-        title = get_random_page(opener)
-        if not title:
-            print("Error: Could not get random page")
-            sys.exit(1)
-        print(f"Random page selected")
-    print(f"Selected: {title}")
-
-    content, pageid = get_page_content(opener, title)
-    if content is None:
-        print(f"Error: Could not fetch content for {title}")
-        sys.exit(1)
-    print(f"Page ID {pageid}, {len(content)} characters")
-
-    new_content, changes, orphans = transform_wikitext(content, territory_map)
-
-    # Classify orphan URLs by type for the log
-    source = "category" if minute < 30 else "random"
-    orphan_types = {}
-    for url in orphans:
-        if "openstreetmap.org" in url:
-            kind = "osm"
-        elif "/user/" in url:
-            kind = "ogf-user"
-        elif "/way/" in url or "/relation/" in url or "/node/" in url or "/changeset/" in url:
-            kind = "ogf-object"
-        elif "/#map=" in url or "/map=" in url:
-            kind = "ogf-map"
+        # Decide page source based on current minute:
+        #   minute < 30 → pick from Category:Territory application
+        #   minute >= 30 → pick a random page (excl. Template/Admin/OpenGeofiction/Help)
+        minute = datetime.datetime.now(datetime.timezone.utc).minute
+        if minute < 30:
+            pages = get_category_pages(opener)
+            if not pages:
+                print("Error: No pages found in Category:Territory application")
+                sys.exit(1)
+            title = random.choice(pages)
+            print(f"Found {len(pages)} pages in category")
         else:
-            kind = "ogf-other"
-        orphan_types.setdefault(kind, []).append(url)
+            title = get_random_page(opener)
+            if not title:
+                print("Error: Could not get random page")
+                sys.exit(1)
+            print(f"Random page selected")
+        titles = [title]
 
-    # Always write to the daily book (even if no changes, orphans are valuable)
-    entry = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "script": "templateFix",
-        "page": title,
-        "pageid": pageid,
-        "source": source,
-        "edits": len(changes),
-        "orphan_count": len(orphans),
-        "orphan_types": {k: len(v) for k, v in orphan_types.items()},
-        "orphans": orphans,
-        "changes": changes,
-    }
-    if dry_run:
-        entry["dry_run"] = True
-    write_daily_book(entry)
+    total_edits = 0
+    total_pages_changed = 0
+    for idx, title in enumerate(titles):
+        if len(titles) > 1:
+            print(f"\n--- [{idx + 1}/{len(titles)}] {title} ---")
+        else:
+            print(f"Selected: {title}")
 
-    if orphans:
-        print(f"\n{len(orphans)} orphan URL(s) found (not converted):")
+        content, pageid = get_page_content(opener, title)
+        if content is None:
+            print(f"Error: Could not fetch content for {title}")
+            if len(titles) > 1:
+                continue
+            sys.exit(1)
+        print(f"Page ID {pageid}, {len(content)} characters")
+
+        new_content, changes, orphans = transform_wikitext(content, territory_map)
+
+        # Classify orphan URLs by type for the log
+        if page_list:
+            source = "batch"
+        else:
+            source = "category" if minute < 30 else "random"
+        orphan_types = {}
         for url in orphans:
-            print(f"  {url}")
+            if "openstreetmap.org" in url:
+                kind = "osm"
+            elif "/user/" in url:
+                kind = "ogf-user"
+            elif "/way/" in url or "/relation/" in url or "/node/" in url or "/changeset/" in url:
+                kind = "ogf-object"
+            elif "/#map=" in url or "/map=" in url:
+                kind = "ogf-map"
+            else:
+                kind = "ogf-other"
+            orphan_types.setdefault(kind, []).append(url)
 
-    if not changes:
-        print("No replacements needed — exiting")
-        sys.exit(0)
+        # Always write to the daily book (even if no changes, orphans are valuable)
+        entry = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "script": "templateFix",
+            "page": title,
+            "pageid": pageid,
+            "source": source,
+            "edits": len(changes),
+            "orphan_count": len(orphans),
+            "orphan_types": {k: len(v) for k, v in orphan_types.items()},
+            "orphans": orphans,
+            "changes": changes,
+        }
+        if dry_run:
+            entry["dry_run"] = True
+        write_daily_book(entry)
 
-    print(f"\n{len(changes)} replacement(s) to apply:")
-    for c in changes:
-        print(f"  {c}")
+        if orphans:
+            print(f"\n{len(orphans)} orphan URL(s) found (not converted):")
+            for url in orphans:
+                print(f"  {url}")
 
-    if dry_run:
-        print("\nDry-run mode — no edit saved")
-        sys.exit(0)
+        if not changes:
+            print("No replacements needed")
+            continue
 
-    if edit_page(opener, title, new_content,
-                 "Replace bare territory IDs and map URLs with wiki templates",
-                 pageid):
-        print(f"\nSuccessfully updated {title}")
-    else:
-        print(f"\nFailed to save edit for {title}")
-        sys.exit(1)
+        print(f"\n{len(changes)} replacement(s) to apply:")
+        for c in changes:
+            print(f"  {c}")
+        total_edits += len(changes)
+        total_pages_changed += 1
+
+        if dry_run:
+            print("Dry-run mode — edit not saved")
+            continue
+
+        if edit_page(opener, title, new_content,
+                     "Replace bare territory IDs and map URLs with wiki templates",
+                     pageid):
+            print(f"Successfully updated {title}")
+        else:
+            print(f"Failed to save edit for {title}")
+
+    # Summary for batch mode
+    if len(titles) > 1:
+        print(f"\n=== Summary ===")
+        print(f"  Pages processed: {len(titles)}")
+        print(f"  Pages changed:   {total_pages_changed}")
+        print(f"  Total edits:     {total_edits}")
+        if dry_run:
+            print("  (dry-run mode — no edits saved)")
 
 
 if __name__ == "__main__":
