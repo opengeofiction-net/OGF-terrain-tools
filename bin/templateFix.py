@@ -170,7 +170,8 @@ def get_recently_changed_pages(opener, hours=24):
     """Fetch pages changed in the last N hours via the recentchanges API.
 
     Returns a list of unique page titles, excluding Template:,
-    OpenGeofiction:, and User:Brothie (including subpages).
+    OpenGeofiction:, User:Brothie (including subpages), and pages
+    where Brothie was the last editor (the bot already cleaned them).
     """
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     cutoff_ts = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -182,7 +183,7 @@ def get_recently_changed_pages(opener, hours=24):
         params = {
             "action": "query",
             "list": "recentchanges",
-            "rcprop": "title|timestamp",
+            "rcprop": "title|timestamp|user",
             "rclimit": "max",        # 500 per request
             "rctype": "edit|new",
             "rctoponly": "1",         # one entry per page
@@ -206,6 +207,9 @@ def get_recently_changed_pages(opener, hours=24):
             if title.startswith("Template:") or title.startswith("OpenGeofiction:"):
                 continue
             if title == "User:Brothie" or title.startswith("User:Brothie/"):
+                continue
+            # Skip pages where the bot itself was the last editor
+            if change.get("user") == "Brothie":
                 continue
             pages.add(title)
 
