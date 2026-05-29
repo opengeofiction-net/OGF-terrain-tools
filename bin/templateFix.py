@@ -635,18 +635,22 @@ def transform_wikitext(content, territory_map):
     id_pat = "|".join(escaped)
 
     # Match territory IDs while skipping content inside {{...}} templates
-    # (so already-templated references like {{relation|314512|AN106}} are left alone).
+    # (so already-templated references like {{relation|314512|AN106}} are left alone)
+    # and inside [[File:...]] / [[Image:...]] links (false positives like
+    # [[File:AN146-Physical-2.png]] would break the file reference).
     # Only the FIRST occurrence of each territory ID is replaced.
     seen_ids = set()
     territory_re = re.compile(
-        r"{{[^}]*}}"   # skip template spans
+        r"{{[^}]*}}"           # skip template spans
+        r"|"
+        r"\[\[(?:File|Image):[^\]]*\]\]"  # skip File:/Image: links
         r"|"
         rf"\b({id_pat})\b"  # capture territory IDs
     )
 
     def _tid_repl(m):
-        if m.group(0).startswith("{{"):
-            return m.group(0)  # leave existing templates untouched
+        if m.group(0).startswith("{{") or m.group(0).startswith("[[File:") or m.group(0).startswith("[[Image:"):
+            return m.group(0)  # leave templates and File:/Image: links untouched
         tid = m.group(1)
         if tid in seen_ids:
             return m.group(0)  # only replace first occurrence
