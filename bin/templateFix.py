@@ -343,6 +343,25 @@ def transform_wikitext(content, territory_map):
         r"[^\]]*\]"
     )
 
+    # Diary URLs (/user/NAME/diary/NNN) — no template exists, leave untouched.
+    # Use placeholders to protect them from the user-profile patterns below.
+    diary_pat = re.compile(
+        r"(?:\[)?"                                  # optional wikilink bracket
+        r"https?://(?:www\.)?opengeofiction\.net/user/[^/\s]+/diary/\d+"
+        r"(?:[?#][^\s\]<>]*)?"
+        r"(?:\s+[^\]]*\])?"                         # optional wikilink display text + close
+    )
+    diary_protected = {}
+
+    def _protect_diary(m):
+        nonlocal diary_protected
+        idx = len(diary_protected)
+        ph = f"__DIARYPROTECT_{idx}__"
+        diary_protected[ph] = m.group(0)
+        return ph
+
+    content = diary_pat.sub(_protect_diary, content)
+
     def _user_wikilink_repl(m, history=False):
         # Decode %20 and + to spaces for the template parameter
         raw_name = m.group(1)
@@ -587,8 +606,10 @@ def transform_wikitext(content, territory_map):
 
     content = territory_re.sub(_tid_repl, content)
 
-    # ---- Pass 3: Restore protected {{#multimaps:...}} blocks ------------
+    # ---- Pass 3: Restore protected blocks ------------
     for ph, original in protected.items():
+        content = content.replace(ph, original)
+    for ph, original in diary_protected.items():
         content = content.replace(ph, original)
 
     # ---- Pass 4: Find orphan URLs (bare OGF/OSM links not converted) ----
@@ -622,6 +643,10 @@ def find_orphan_urls(content):
         r"https?://(?:www\.)?openstreetmap\.org/"
         r"(?:way|relation|node|changeset)/\d+"
     )
+    # Diary URLs are intentionally left unconverted — no template exists
+    diary_orphan_re = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/user/[^/\s]+/diary/\d+"
+    )
     seen = set()
     orphans = []
     for m in orphan_re.finditer(content):
@@ -630,6 +655,9 @@ def find_orphan_urls(content):
             continue
         # Skip OSM bare object URLs — they are genuine cross-wiki references
         if osm_object_re.match(url):
+            continue
+        # Skip diary URLs — intentionally left unconverted, no template exists
+        if diary_orphan_re.match(url):
             continue
         seen.add(url)
         orphans.append(url)
