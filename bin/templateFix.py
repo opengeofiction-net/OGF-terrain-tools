@@ -166,6 +166,56 @@ def get_random_page(opener):
     return pages[0]["title"] if pages else None
 
 
+def get_recently_changed_pages(opener, hours=24):
+    """Fetch pages changed in the last N hours via the recentchanges API.
+
+    Returns a list of unique page titles, excluding Template:,
+    OpenGeofiction:, and User:Brothie (including subpages).
+    """
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    cutoff_ts = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    pages = set()
+    rcstart = None  # start from the most recent
+
+    while True:
+        params = {
+            "action": "query",
+            "list": "recentchanges",
+            "rcprop": "title|timestamp",
+            "rclimit": "max",        # 500 per request
+            "rctype": "edit|new",
+            "rctoponly": "1",         # one entry per page
+            "format": "json",
+        }
+        if rcstart:
+            params["rcstart"] = rcstart
+
+        data = api_get(opener, params)
+        if not data:
+            break
+
+        changes = data.get("query", {}).get("recentchanges", [])
+        done = False
+        for change in changes:
+            if change["timestamp"] < cutoff_ts:
+                done = True
+                break
+            title = change["title"]
+            # Excluded namespaces and pages
+            if title.startswith("Template:") or title.startswith("OpenGeofiction:"):
+                continue
+            if title == "User:Brothie" or title.startswith("User:Brothie/"):
+                continue
+            pages.add(title)
+
+        if done or "continue" not in data:
+            break
+        rcstart = data["continue"]["rccontinue"]
+
+    return sorted(pages)
+
+
 def get_page_content(opener, title):
     """Fetch wikitext content and pageid. Returns (content, pageid) or (None, None)."""
     data = api_get(opener, {
@@ -698,6 +748,7 @@ def check_bot_permission():
 # --------------------------------------------------------------------------
 def main():
     dry_run = "--dry-run" in sys.argv
+    use_recent = "--recent" in sys.argv
 
     # --pages FILE: read page titles from FILE (one per line) and process all
     pages_file = None
@@ -749,6 +800,17 @@ def main():
     # Build the list of titles to process
     if page_list:
         titles = page_list
+    elif use_recent:
+        titles = get_recently_changed_pages(opener)
+        if not titles:
+            print("No recently changed pages found — exiting")
+            sys.exit(0)
+        print(f"Found {len(titles)} pages changed in the last 24 hours")
+        if dry_run:
+            print("Dry-run mode — listing pages that would be checked:")
+            for t in titles:
+                print(f"  {t}")
+            sys.exit(0)
     else:
         # Decide page source based on current minute:
         #   minute < 30 → pick from Category:Territory application
@@ -790,6 +852,8 @@ def main():
         # Classify orphan URLs by type for the log
         if page_list:
             source = "batch"
+        elif use_recent:
+            source = "recent"
         else:
             source = "category" if minute < 30 else "random"
         orphan_types = {}
