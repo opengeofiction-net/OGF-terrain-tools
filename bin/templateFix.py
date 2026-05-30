@@ -210,6 +210,8 @@ def get_recently_changed_pages(opener, hours=24):
                 continue
             if title == "Help:Frequently asked questions":
                 continue
+            if title == "Main Page" or title.startswith("Main Page/"):
+                continue
             # Skip pages where the bot itself was the last editor
             if change.get("user") == "Brothie":
                 continue
