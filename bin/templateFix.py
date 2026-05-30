@@ -678,6 +678,44 @@ def transform_wikitext(content, territory_map):
         return _mlat_to_coordosm(url)
     content = mlat_bare_pat.sub(_mlat_bare_repl, content)
 
+    # ---- Pass 1d: OGF /query?lat=...&lon=... and /search?query=... URLs → {{coord}} ----
+    # These open the query tool at specific coordinates.  Zoom is extracted
+    # from optional #map= fragment; defaults to 13.
+
+    def _ogf_query_to_coord(url, name=""):
+        """Convert an OGF /query or /search URL to {{coord}} template."""
+        lat, lon, zoom = "", "", "13"
+        if "search" in url:
+            # /search?whereami=1&query=LAT%2CLON#map=Z/...
+            qm = re.search(r"query=([-+]?\d+(?:\.\d+)?)%2C([-+]?\d+(?:\.\d+)?)", url)
+            if qm:
+                lat, lon = qm.group(1), qm.group(2)
+        else:
+            # /query?lat=...&lon=...
+            lat_m = re.search(r"lat=([-+]?\d+(?:\.\d+)?)", url)
+            lon_m = re.search(r"lon=([-+]?\d+(?:\.\d+)?)", url)
+            if lat_m:
+                lat = lat_m.group(1)
+            if lon_m:
+                lon = lon_m.group(1)
+        zoom_m = re.search(r"#map=(\d+)", url)
+        if zoom_m:
+            zoom = zoom_m.group(1)
+        params = f"latitude={lat}|longitude={lon}|zoom={zoom}"
+        if name:
+            params += f"|name={name}"
+        changes.append(f"OGF query link → {{{{coord|{params}}}}}")
+        return f"{{{{coord|{params}}}}}"
+
+    query_bare_pat = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/(?:query|search)\?"
+        r"[^\s\]<>}]+"
+    )
+
+    def _query_bare_repl(m):
+        return _ogf_query_to_coord(m.group(0))
+    content = query_bare_pat.sub(_query_bare_repl, content)
+
     # ---- Pass 2: Replace bare territory IDs (first occurrence only) ----
     # Build alternation of all known territory IDs, longest first to avoid
     # partial matches (e.g. AN106 matching inside AN106a).
