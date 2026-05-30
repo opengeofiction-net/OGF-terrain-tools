@@ -632,6 +632,52 @@ def transform_wikitext(content, territory_map):
 
     content = coordosm_pat.sub(_coordosm_repl, content)
 
+    # ---- Pass 1c: OSM ?mlat=...&mlon=... URLs → {{coordosm}} -------------
+    # These use query parameters instead of a #map= hash fragment.
+
+    def _mlat_to_coordosm(url, name=""):
+        """Convert an OSM ?mlat=&mlon= URL to {{coordosm}} template.
+        Default zoom is 18 if not found in the URL.
+        """
+        mlat_m = re.search(r"mlat=([-+]?\d+(?:\.\d+)?)", url)
+        mlon_m = re.search(r"mlon=([-+]?\d+(?:\.\d+)?)", url)
+        lat = mlat_m.group(1) if mlat_m else ""
+        lon = mlon_m.group(1) if mlon_m else ""
+        zoom_m = re.search(r"#map=(\d+)", url)
+        zoom = zoom_m.group(1) if zoom_m else "18"
+        params = f"latitude={lat}|longitude={lon}|zoom={zoom}"
+        if name:
+            params += f"|name={name}"
+        changes.append(f"osm mlat/mlon link → {{{{coordosm|{params}}}}}")
+        return f"{{{{coordosm|{params}}}}}"
+
+    # Wikilink form: [URL TEXT]
+    mlat_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?openstreetmap\.org/\?"
+        r"[^\s\[]+"
+        r"\s+"
+        r"([^\]]+)\]"
+    )
+
+    def _mlat_wikilink_repl(m):
+        url = m.group(0).lstrip("[").rstrip("]")
+        # Find the display text — everything after the last space before ]]
+        # Split on the last space to separate URL from display text
+        name = m.group(1).strip()
+        return _mlat_to_coordosm(url, name)
+    content = mlat_wikilink_pat.sub(_mlat_wikilink_repl, content)
+
+    # Bare URL form
+    mlat_bare_pat = re.compile(
+        r"https?://(?:www\.)?openstreetmap\.org/\?"
+        r"[^\s\]<>}]+"
+    )
+
+    def _mlat_bare_repl(m):
+        url = m.group(0)
+        return _mlat_to_coordosm(url)
+    content = mlat_bare_pat.sub(_mlat_bare_repl, content)
+
     # ---- Pass 2: Replace bare territory IDs (first occurrence only) ----
     # Build alternation of all known territory IDs, longest first to avoid
     # partial matches (e.g. AN106 matching inside AN106a).
