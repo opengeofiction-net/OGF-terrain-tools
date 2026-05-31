@@ -206,6 +206,8 @@ def get_recently_changed_pages(opener, hours=24):
             # Excluded namespaces and pages
             if title.startswith("Template:") or title.startswith("OpenGeofiction:"):
                 continue
+            if title.startswith("Admin:"):
+                continue
             if title == "User:Brothie" or title.startswith("User:Brothie/"):
                 continue
             if title == "Help:Frequently asked questions":
@@ -234,6 +236,9 @@ def get_page_content(opener, title):
         "format": "json",
     })
     if not data:
+        return None, None
+    if "error" in data:
+        print(f"  API error: {data['error'].get('code')} — {data['error'].get('info')}")
         return None, None
     for pid, page in data.get("query", {}).get("pages", {}).items():
         if pid == "-1":
