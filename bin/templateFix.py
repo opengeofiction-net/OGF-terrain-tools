@@ -735,8 +735,15 @@ def transform_wikitext(content, territory_map):
     # (so already-templated references like {{relation|314512|AN106}} are left alone)
     # and inside [[File:...]] / [[Image:...]] links (false positives like
     # [[File:AN146-Physical-2.png]] would break the file reference).
-    # Only the FIRST occurrence of each territory ID is replaced.
+    #
+    # Only the FIRST occurrence of each territory ID is ever replaced.
+    # IDs that already have a {{relation|...|ID}} on the page (from a prior
+    # run) are pre-seeded into seen_ids so remaining bare occurrences are
+    # permanently skipped.
     seen_ids = set()
+    for m in re.finditer(r"\{\{relation\|(\d+)\|([^}]+)\}\}", content):
+        seen_ids.add(m.group(2))
+
     territory_re = re.compile(
         r"{{[^}]*}}"           # skip template spans
         r"|"
@@ -750,7 +757,7 @@ def transform_wikitext(content, territory_map):
             return m.group(0)  # leave templates and File:/Image: links untouched
         tid = m.group(1)
         if tid in seen_ids:
-            return m.group(0)  # only replace first occurrence
+            return m.group(0)  # already handled — skip all remaining occurrences
         seen_ids.add(tid)
         rid = territory_map[tid]
         changes.append(f"territory ID {tid} → {{{{relation|{rid}|{tid}}}}}")
