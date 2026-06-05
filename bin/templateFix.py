@@ -723,6 +723,98 @@ def transform_wikitext(content, territory_map):
         return _ogf_query_to_coord(m.group(0))
     content = query_bare_pat.sub(_query_bare_repl, content)
 
+    # ---- Pass 1e: OGF map_scale.html URLs → {{scalehelper}} ------------
+    # URLs like /util/map_scale.html?map=5/ZOOM/LAT1/LON1&map2=OSM/x/LAT2/LON2
+    # convert to {{scalehelper|zoom=...|lat1=...|lon1=...|lat2=...|lon2=...}}
+    # with optional map1/map2 if they differ from defaults (5 and OSM).
+
+    def _scalehelper_repl(url, name=""):
+        """Convert a map_scale.html URL to {{scalehelper}} template.
+
+        Lat/lon rounded to 5 decimal places, zoom to integer or 1 decimal.
+        Returns the original URL unchanged if essential params are missing.
+        """
+
+        def _fmt(coord, decimals=5):
+            """Round coordinate, strip trailing zeros after decimal."""
+            s = f"{float(coord):.{decimals}f}"
+            if "." in s:
+                s = s.rstrip("0").rstrip(".")
+            return s
+
+        def _fmt_zoom(z):
+            """Zoom as integer if whole, else 1 decimal place."""
+            s = f"{float(z):.1f}"
+            return s.rstrip("0").rstrip(".") if s.endswith(".0") else s
+
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        map1, zoom, lat1, lon1 = "5", "", "", ""
+        if "map" in qs:
+            parts = qs["map"][0].split("/")
+            if len(parts) >= 4:
+                map1_raw = parts[0]
+                # C (old OGF Carto) is no longer supported by map_scale — map to 5 (standard Carto)
+                if map1_raw == "C":
+                    map1_raw = "5"
+                map1, zoom, lat1, lon1 = map1_raw, _fmt_zoom(parts[1]), _fmt(parts[2]), _fmt(parts[3])
+
+        # If zoom or coords are missing, the URL is malformed — leave it alone
+        if not zoom or not lat1 or not lon1:
+            return url
+
+        map2, lat2, lon2 = "OSM", "", ""
+        if "map2" in qs:
+            parts = qs["map2"][0].split("/")
+            if len(parts) >= 3:
+                lat2, lon2 = _fmt(parts[-2]), _fmt(parts[-1])
+                map2 = parts[0]
+        params = f"zoom={zoom}|lat1={lat1}|lon1={lon1}|lat2={lat2}|lon2={lon2}"
+        if map1 != "5":
+            params = f"map1={map1}|" + params
+        if map2 != "OSM":
+            params = f"map2={map2}|" + params
+        if name:
+            params += f"|label={name}"
+        changes.append(f"map scale link → {{{{scalehelper|{params}}}}}")
+        return f"{{{{scalehelper|{params}}}}}"
+
+    scale_bare_pat = re.compile(
+        r"https?://(?:www\.)?wiki\.opengeofiction\.net/util/map_scale\.html\?"
+        r"[^\s\]<>}]+"
+    )
+
+    # Wikilink form: [URL TEXT] — extract display text as label
+    scale_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?wiki\.opengeofiction\.net/util/map_scale\.html\?"
+        r"[^\s\]]+\s+"
+        r"([^\]]+)\]"
+    )
+
+    def _scale_wikilink_repl(m):
+        url_and_text = m.group(0)[1:-1]  # strip [ and ]
+        name = m.group(1).strip()
+        url = url_and_text[:-(len(name) + 1)]  # strip display text + space
+        return _scalehelper_repl(url, name)
+    content = scale_wikilink_pat.sub(_scale_wikilink_repl, content)
+
+    def _scale_bare_repl(m):
+        return _scalehelper_repl(m.group(0))
+    content = scale_bare_pat.sub(_scale_bare_repl, content)
+
+    # Clean up any {{scalehelper}} templates that were saved with map1=C
+    # (before the C→5 mapping fix was added)
+    def _cleanup_scale_c(m):
+        changes.append("fixed stale scalehelper map1=C → default")
+        return "{{scalehelper|" + m.group(1) + "}}"
+
+    content = re.sub(
+        r"\{\{scalehelper\|map1=C\|([^}]+)\}\}",
+        _cleanup_scale_c,
+        content
+    )
+
     # ---- Pass 2: Replace bare territory IDs (first occurrence only) ----
     # Build alternation of all known territory IDs, longest first to avoid
     # partial matches (e.g. AN106 matching inside AN106a).
