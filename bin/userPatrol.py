@@ -1126,6 +1126,13 @@ def classify_user(user_info, report):
             
             violation_types[status] += 1
         
+        # If all violations were owner-self permitted, clear them entirely —
+        # the user only edited their own territory, nothing to flag.
+        if permitted_violations and not violation_types:
+            report["violations"] = []
+            violations = 0
+            permitted_violations.clear()
+        
         # Report permitted edits (no penalty)
         for status, count in permitted_violations.items():
             reasons.append(f"Mapped {count} nodes in {status} territories with owner permission (no penalty)")
