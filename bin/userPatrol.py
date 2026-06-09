@@ -1113,6 +1113,11 @@ def classify_user(user_info, report):
             # Check if user has explicit permission from territory owner
             has_permission = False
             if owner and status in ["owned", "marked for withdrawal"]:
+                # Territory owner always has permission to edit their own territory
+                if username == owner:
+                    has_permission = True
+                    permitted_violations[status] += 1
+                    continue  # Skip this violation - it's permitted
                 allowed_editors = fetch_user_allowed_editors(owner)
                 if username in allowed_editors:
                     has_permission = True
