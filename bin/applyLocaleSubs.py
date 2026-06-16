@@ -2,8 +2,8 @@
 """
 applyLocaleSubs.py
 
-Transforms OpenStreetMap references to OpenGeofiction in locale files
-and selected config files. Run this after pulling upstream translations.
+Transforms OpenStreetMap references to OpenGeofiction in locale files.
+Run this after pulling upstream translations.
 
 Idempotent: safe to run multiple times — OGF strings will not match
 the OSM search patterns, so re-running produces no further changes.
@@ -378,9 +378,8 @@ def main() -> None:
         sys.exit(1)
 
     # Additional config files that also contain OSM references
-    EXTRA_FILES = [
-        "config/settings.yml",
-    ]
+    # (settings.yml is intentionally excluded — OGF overrides go in settings.local.yml)
+    EXTRA_FILES = []
     for rel in EXTRA_FILES:
         p = repo / rel
         if p.exists():
