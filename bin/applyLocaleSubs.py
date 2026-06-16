@@ -33,8 +33,7 @@ from pathlib import Path
 #
 #   switch2osm.org          — generic resource for OSM-based infra switching;
 #                             useful context for OGF users too.
-#   osmfoundation.org       — OGF data is ODbL-licensed under OSMF; links
-#                             to the foundation remain legally correct.
+#   osmfoundation.org       — all URLs mapped to appropriate OGF wiki pages.
 #   dmca.openstreetmap.org  — mapped to OpenGeofiction:Contact.
 #   State of the Map        — OSM trademark; OGF has no equivalent conference
 #                             name yet. Left for manual review.
