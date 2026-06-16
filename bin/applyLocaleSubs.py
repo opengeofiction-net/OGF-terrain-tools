@@ -231,15 +231,26 @@ def load_overrides(overrides_path: Path) -> dict:
             key = line[:colon].strip()
             rest = line[colon + 1:]
             if rest.strip() == "|":
-                # Block scalar — collect until next non-indented line
-                block_lines = [rest]  # keep the "|\n" marker
+                # Block scalar — collect content lines, strip their source
+                # indentation so apply_overrides can re-indent to the correct
+                # depth for the target file.
+                content_lines = []
                 i += 1
                 while i < len(lines) and (not lines[i] or lines[i][0].isspace()):
-                    block_lines.append(lines[i])
+                    content_lines.append(lines[i])
                     i += 1
-                overrides[key] = "".join(block_lines)
+                # Find minimum indentation of non-empty content lines
+                src_indent = min(
+                    (len(l) - len(l.lstrip()) for l in content_lines if l.strip()),
+                    default=0,
+                )
+                stripped_lines = [
+                    l[src_indent:] if l.strip() else l
+                    for l in content_lines
+                ]
+                overrides[key] = ("block", "".join(stripped_lines))
             else:
-                overrides[key] = rest  # inline scalar (including leading space)
+                overrides[key] = ("inline", rest)  # includes leading space
                 i += 1
         else:
             i += 1
@@ -301,12 +312,18 @@ def apply_overrides(path: Path, overrides: dict, dry_run: bool, verbose: bool) -
                 current_path = ".".join(k for _, k in indent_stack)
 
                 if current_path in overrides:
-                    override_val = overrides[current_path]
-                    # Reconstruct the line with the override value
+                    kind, override_val = overrides[current_path]
                     prefix = " " * indent + key_frag + ":"
-                    new_lines.append(prefix + override_val
-                                     if not override_val.startswith("\n")
-                                     else prefix + override_val)
+                    if kind == "block":
+                        # Re-indent content to key_indent + 2
+                        target_indent = " " * (indent + 2)
+                        content = "".join(
+                            target_indent + l if l.strip() else l
+                            for l in override_val.splitlines(keepends=True)
+                        )
+                        new_lines.append(prefix + " |\n" + content)
+                    else:
+                        new_lines.append(prefix + override_val)
                     replaced += 1
                     if verbose:
                         file_changes.append(f"  override: {current_path}")
