@@ -21,6 +21,7 @@ Example:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -68,7 +69,7 @@ SUBSTITUTIONS = [
     ("https://osmfoundation.org/wiki/Licence_and_Legal_FAQ/Why_would_I_want_my_contributions_to_be_public_domain",
      "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Contributor_Terms"),
     ("https://osmfoundation.org/wiki/Licence/Attribution_Guidelines",
-     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Copyright"),
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Attribution"),
     ("https://osmfoundation.org/wiki/Licence/Contributor_Terms",
      "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Contributor_Terms"),
     ("https://osmfoundation.org/wiki/Terms_of_Use",
@@ -102,8 +103,73 @@ SUBSTITUTIONS = [
      "wiki.opengeofiction.net/index.php/OpenGeofiction:Donate"),
     ("dmca.openstreetmap.org",
      "wiki.opengeofiction.net/index.php/OpenGeofiction:Contact"),
+    # -- openstreetmap.org wiki --------------------------------------------------
+    # Strip language prefixes (DE:, FR:, Zh-hans:, Bs:, etc.) FIRST so the
+    # English-page rules below can fire on the normalised URL.
+    # Regex matches 2–3 letter base codes (ISO 639) plus optional script subtag,
+    # with a negative lookahead to exclude MediaWiki content namespaces (Key:,
+    # Tag:, Relation:, Special:, Template:, etc.) which must not be stripped.
+    # e.g. .../wiki/Da:Anonymous_edits -> .../wiki/Anonymous_edits (caught below)
+    # Pages with translated names (e.g. FR:Guide_du_d%C3%A9butant) fall through
+    # to the domain swap and remain as wiki.opengeofiction.net/wiki/<name>.
+    (re.compile(r'(https?://wiki\.openstreetmap\.org/wiki/)(?!Key:|Tag:|Relation:|Template:|File:|Help:|Talk:|User:|Special:|Category:)[A-Za-z]{2,3}(?:-[A-Za-z]+)?:'), r'\1'),
+    # Special:MyLanguage variants (most-specific, before bare page names)
+    ("https://wiki.openstreetmap.org/wiki/Special:MyLanguage/Films",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Attribution#Films"),
+    ("https://wiki.openstreetmap.org/wiki/Special:MyLanguage/TV_series",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Attribution#TV_series"),
+    # Anchored variants before bare page names
+    ("https://wiki.openstreetmap.org/wiki/GPX#Troubleshooting",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started"),
+    # index.php?title= style URLs (old MediaWiki format)
+    ("https://wiki.openstreetmap.org/index.php?title=Upload",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started"),
+    # English page names
+    ("https://wiki.openstreetmap.org/wiki/About_OpenStreetMap",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:About"),
+    ("https://wiki.openstreetmap.org/wiki/Films",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Attribution#Films"),
+    ("https://wiki.openstreetmap.org/wiki/TV_series",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Attribution#TV_series"),
+    ("https://wiki.openstreetmap.org/wiki/Automated_Edits_code_of_conduct",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Site_policies"),
+    ("https://wiki.openstreetmap.org/wiki/Acceptable_Use_Policy",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Site_policies"),
+    ("https://wiki.openstreetmap.org/wiki/Anonymous_edits",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Site_policies"),
+    ("https://wiki.openstreetmap.org/wiki/Import/Guidelines",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Site_policies"),
+    ("https://wiki.openstreetmap.org/wiki/Beginners%27_guide",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started"),
+    ("https://wiki.openstreetmap.org/wiki/Beginners_Guide_1.2",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started"),
+    ("https://wiki.openstreetmap.org/wiki/Visibility_of_GPS_traces",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started"),
+    ("https://wiki.openstreetmap.org/wiki/Upload",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Getting_started"),
+    ("https://wiki.openstreetmap.org/wiki/GPX_Import_Failures",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Contact"),
+    ("https://wiki.openstreetmap.org/wiki/Contact_channels",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Contact"),
+    ("https://wiki.openstreetmap.org/wiki/Contact",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Contact"),
+    ("https://wiki.openstreetmap.org/wiki/Contributor_Terms_Declined",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Contributor_Terms"),
+    ("https://wiki.openstreetmap.org/wiki/Contributors",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Admin_team"),
+    ("https://wiki.openstreetmap.org/wiki/User_group",
+     "https://wiki.opengeofiction.net/index.php/OpenGeofiction:Admin_team"),
+    ("https://wiki.openstreetmap.org/wiki/Gravatar",
+     "https://wiki.opengeofiction.net/index.php/Help:Frequently_asked_questions#Gravatar"),
+    ("https://wiki.openstreetmap.org/wiki/This_map_requires_WebGL",
+     "https://wiki.opengeofiction.net/index.php/Help:Frequently_asked_questions#This_map_requires_WebGL"),
     ("wiki.openstreetmap.org",
      "wiki.opengeofiction.net"),
+    # OSM tagging documentation (Key:, Tag:, Relation:) lives on the OSM wiki —
+    # OGF uses the same tagging schema. Revert the domain swap for these.
+    ("wiki.opengeofiction.net/wiki/Key:",      "wiki.openstreetmap.org/wiki/Key:"),
+    ("wiki.opengeofiction.net/wiki/Tag:",      "wiki.openstreetmap.org/wiki/Tag:"),
+    ("wiki.opengeofiction.net/wiki/Relation:", "wiki.openstreetmap.org/wiki/Relation:"),
     # community — specific paths before bare domain
     ("https://community.openstreetmap.org/c/communities/dk/77",
      "https://wiki.opengeofiction.net/index.php/Forum:Index"),
@@ -150,6 +216,14 @@ SUBSTITUTIONS = [
     ("OSM contributors",            "OGF contributors"),
     # -- Bare project name ---------------------------------------------------
     ("OpenStreetMap",               "OpenGeofiction"),
+    # -- Catch-all for residual wiki.opengeofiction.net/wiki/ URLs ------------
+    # The OGF wiki does not use the /wiki/ path prefix (only /index.php/).
+    # Any remaining /wiki/ URLs are either translated-name language pages with
+    # no OGF equivalent, or other unmapped paths.  Redirect them to the wiki
+    # main page.  Key:/Tag:/Relation: links have already been reverted to
+    # wiki.openstreetmap.org above, so they are not caught here.
+    (re.compile(r'https?://wiki\.opengeofiction\.net/wiki/[^\s"\'<>]+'),
+     "https://wiki.opengeofiction.net/"),
 ]
 
 
@@ -161,9 +235,15 @@ def apply_substitutions(text: str) -> tuple[str, list[str]]:
     """Apply all substitutions to a string. Returns (new_text, list_of_changes)."""
     changes = []
     for old, new in SUBSTITUTIONS:
-        if old in text:
-            text = text.replace(old, new)
-            changes.append(f"  {old!r} → {new!r}")
+        if isinstance(old, re.Pattern):
+            new_text, count = old.subn(new, text)
+            if count:
+                text = new_text
+                changes.append(f"  /{old.pattern}/ → {new!r}")
+        else:
+            if old in text:
+                text = text.replace(old, new)
+                changes.append(f"  {old!r} → {new!r}")
     return text, changes
 
 

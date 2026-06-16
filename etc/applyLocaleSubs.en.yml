@@ -15,6 +15,4 @@ en.site.about_section.community_driven_1_html: |
   OpenGeofiction's community is diverse, passionate, and growing every day.
   Our contributors include enthusiast mappers, worldbuilders, cartographers,
   engineers running the OGF servers, and many more.
-  To learn more about the community, see the %{osm_blog_link},
-  %{user_diaries_link}, %{community_blogs_link}, and the
-  %{osm_foundation_link} website.
+  To learn more about the community, see the %{osm_blog_link}.
