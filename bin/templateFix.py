@@ -535,6 +535,36 @@ def transform_wikitext(content, territory_map):
 
     content = coord_pat.sub(_coord_repl, content)
 
+    # ---- Pass 1a (history): OGF /history#map= URLs → {{coord|action=history}} ----
+    # History links open the edit history view at the given coordinates.
+
+    history_wikilink_pat = re.compile(
+        r"\[https?://(?:www\.)?opengeofiction\.net/history#map="
+        r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+        r"(?:[&?][^\s\]]*)?\s+"
+        r"([^\]]+)\]"
+    )
+
+    def _history_wikilink_repl(m):
+        zoom, lat, lon, name = m.group(1), m.group(2), m.group(3), m.group(4).strip()
+        changes.append(f"history link → {{coord|latitude={lat}|longitude={lon}|zoom={zoom}|action=history|name={name}}}")
+        return f"{{{{coord|latitude={lat}|longitude={lon}|zoom={zoom}|action=history|name={name}}}}}"
+
+    content = history_wikilink_pat.sub(_history_wikilink_repl, content)
+
+    history_bare_pat = re.compile(
+        r"https?://(?:www\.)?opengeofiction\.net/history#map="
+        r"(\d+)/([-+]?\d+(?:\.\d+)?)/([-+]?\d+(?:\.\d+)?)"
+        r"(?:[&?][^\s\]<>]*)?"
+    )
+
+    def _history_bare_repl(m):
+        zoom, lat, lon = m.group(1), m.group(2), m.group(3)
+        changes.append(f"history link → {{coord|latitude={lat}|longitude={lon}|zoom={zoom}|action=history}}")
+        return f"{{{{coord|latitude={lat}|longitude={lon}|zoom={zoom}|action=history}}}}"
+
+    content = history_bare_pat.sub(_history_bare_repl, content)
+
     # ---- Pass 1a: Replace OGF edit URLs → {{coord}} ---------------------
     # Edit links like https://opengeofiction.net/edit#map=18/-11.86/170.58
     # carry coordinate fragments and should be converted to {{coord}}.
