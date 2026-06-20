@@ -1105,6 +1105,7 @@ def classify_user(user_info, report):
         # Categorize violation types and check for explicit permissions
         violation_types = defaultdict(int)
         permitted_violations = defaultdict(int)  # violations that have explicit permission
+        actual_violations = []  # non-permitted violations only
         
         for v in report["violations"]:
             status = v["territory_status"]
@@ -1125,13 +1126,13 @@ def classify_user(user_info, report):
                     continue  # Skip this violation - it's permitted
             
             violation_types[status] += 1
+            actual_violations.append(v)
         
-        # If all violations were owner-self permitted, clear them entirely —
-        # the user only edited their own territory, nothing to flag.
-        if permitted_violations and not violation_types:
-            report["violations"] = []
-            violations = 0
-            permitted_violations.clear()
+        # Replace violations list with only non-permitted violations.
+        # This keeps the count accurate for summary/daily-book output
+        # even in the mixed case (e.g. 5028 permitted + 7 real = 7, not 5035).
+        report["violations"] = actual_violations
+        violations = len(actual_violations)
         
         # Report permitted edits (no penalty)
         for status, count in permitted_violations.items():
