@@ -869,13 +869,13 @@ def transform_wikitext(content, territory_map):
     territory_re = re.compile(
         r"{{[^}]*}}"           # skip template spans
         r"|"
-        r"\[\[(?:File|Image):[^\]]*\]\]"  # skip File:/Image: links
+        r"\[\[[^\]]*\]\]"  # skip all wikilinks (File:, Image:, plain [[ID]], etc.)
         r"|"
         rf"\b({id_pat})\b"  # capture territory IDs
     )
 
     def _tid_repl(m):
-        if m.group(0).startswith("{{") or m.group(0).startswith("[[File:") or m.group(0).startswith("[[Image:"):
+        if m.group(0).startswith("{{") or m.group(0).startswith("[["):
             return m.group(0)  # leave templates and File:/Image: links untouched
         tid = m.group(1)
         if tid in seen_ids:
