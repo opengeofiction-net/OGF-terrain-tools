@@ -19,7 +19,5 @@ nytprof.out
 *.bs
 /_eumm/
 bin/__pycache__
-bin/update_action_log.py
-bin/run_wiki_update.py
 var
 .claude/
