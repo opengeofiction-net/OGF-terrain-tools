@@ -121,7 +121,7 @@ foreach my $way ( values %{$ctx->{_Way}} ){
 
 
 #                        ( 50, 100, 200, 400, 800, 1600, 3200 ){
-foreach my $avwThreshold ( 100 ){
+foreach my $avwThreshold ( 50 ){
 
     my $ctx3 = OGF::Data::Context->new();
     $ctx3->{_Node} = $ctx->{_Node};
@@ -199,7 +199,7 @@ foreach my $avwThreshold ( 100 ){
         $hPolygons->{$relKey} = \@polygon;
     };
 
-    if( $avwThreshold == 100 ){
+    if( $avwThreshold == 50 ){
 		my $outFile = "$OUTPUT_DIR/${OUTFILE_NAME}_errors.json";
 		my $exit = 0;
         my $aErrors = verifyTerritories( $hPolygons, $aTerr );
