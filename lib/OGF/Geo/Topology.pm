@@ -102,7 +102,16 @@ sub buildWaySequence {
 	}
 
 	$hOpt->{'relOrder'} = \%relOrder if $hOpt->{'relOrder'};
-	buildWaySequence( $ctx, $rel || undef, $hWays, $hOpt ) unless $repeatFlag;
+	# Multiple convergence passes: keep trying until no more merges
+	# (hash iteration order can cause ways to be orphaned in a single pass)
+	if( !$repeatFlag && defined($hWays) ){
+		while( scalar(keys %$hWays) > 1 ){
+			my $countBefore = scalar(keys %$hWays);
+			buildWaySequence( $ctx, $rel || undef, $hWays, $hOpt );
+			last if scalar(keys %$hWays) >= $countBefore;
+		}
+	}
+
 
 	return $hOpt->{'relOrder'} ? [ sort {scalar(@$b) <=> scalar(@$a)} values %relOrder ] : [ values %$hWays ];
 }
