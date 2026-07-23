@@ -126,8 +126,8 @@ bin/adminPolygonsToMultimap.pl
 bin/adminPolygonsToMultimapTimezone.pl
   # Exports timezone-aware admin polygons
 
-bin/simplifiedAdminPolygons.pl
-  # Creates simplified versions of admin boundaries
+bin/simplifiedAdminPolygons.py
+  # Creates simplified versions of admin boundaries (Python rewrite of the Perl original, ~8x faster)
 
 bin/checkContinent.pl
   # Validates continent boundary data
