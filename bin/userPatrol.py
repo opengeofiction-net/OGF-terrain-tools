@@ -702,12 +702,12 @@ def load_new_users():
     return users
 
 def load_territories():
-    """Load territory polygons from territory.json."""
+    """Load territory polygons from territory.json. Raises SystemExit on failure."""
     print("[2/4] Loading territory polygons...")
     data = json_get(TERRITORY_URL)
     if not data:
-        print("  ERROR: Could not load territory.json")
-        return {}
+        print("  FATAL: Could not load territory.json — cannot patrol without territory data")
+        sys.exit(1)
     territories = {}
     for ogf_id, coords in data.items():
         outer, holes = parse_territory_polygon(coords)
@@ -722,17 +722,18 @@ def load_territory_statuses():
     """
     Load territory statuses from the wiki raw JSON.
     Returns dict: rel_id -> {"status", "owner", "ogfId"}
+    Raises SystemExit on failure — cannot patrol without status data.
     """
     print("[3/4] Loading territory statuses...")
     data = json_get(TERRITORY_STATUS_URL)
     if data is None:
-        print("  WARNING: Could not load territory statuses. Using permissive mode.")
-        return {}
+        print("  FATAL: Could not load territory statuses — cannot patrol without status data")
+        sys.exit(1)
     try:
         return _parse_statuses_data(data)
     except Exception as e:
-        print(f"  WARNING: Could not parse territory status JSON: {e}")
-        return {}
+        print(f"  FATAL: Could not parse territory status JSON: {e}")
+        sys.exit(1)
 
 def _parse_statuses_data(data):
     """Parse territory status data from either a list or a dict."""

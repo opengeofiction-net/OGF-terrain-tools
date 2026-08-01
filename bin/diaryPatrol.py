@@ -10,6 +10,7 @@ Uses web session authentication (same as Brothie user).
 """
 
 import requests
+from requests.adapters import HTTPAdapter
 import re
 import json
 import os
@@ -24,6 +25,19 @@ OGF_URL = "https://opengeofiction.net"
 DIARY_URL = f"{OGF_URL}/diary"
 LOGIN_URL = f"{OGF_URL}/login"
 API_URL = f"{OGF_URL}/api/0.6/user/"
+
+
+class TimeoutHTTPAdapter(HTTPAdapter):
+    """HTTPAdapter that defaults all requests to a 30s timeout."""
+    def __init__(self, *args, timeout=30, **kwargs):
+        self._default_timeout = timeout
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+        if timeout is None:
+            timeout = self._default_timeout
+        return super().send(request, stream=stream, timeout=timeout,
+                           verify=verify, cert=cert, proxies=proxies)
 
 # Entries after this date from non-admin users should be hidden
 CUTOFF_DATE = datetime(2026, 5, 1, tzinfo=timezone.utc)
@@ -296,6 +310,8 @@ def main():
     username, password = load_credentials()
     
     session = requests.Session()
+    session.mount("https://", TimeoutHTTPAdapter(timeout=30))
+    session.mount("http://", TimeoutHTTPAdapter(timeout=30))
     session.headers.update({
         "User-Agent": USER_AGENT,
         "Referer": REFERER
