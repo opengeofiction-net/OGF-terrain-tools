@@ -1,0 +1,19 @@
+[Unit]
+Description=Generates sitemap for OpenGeofiction wiki %i
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+User=ogf
+Group=ogf
+
+Environment=MEDIAWIKI_INSTALL=/var/www/html/wiki.opengeofiction.net/public_html
+Environment=SITEMAP_PATH=/var/www/html/wiki.opengeofiction.net/public_html/sitemap/
+Environment=IDENTIFIER=wiki.opengeofiction.net
+Environment=URL_PATH=/sitemap/
+Environment=SKIP_REDIRECTS=--skip-redirects
+EnvironmentFile=-/opt/opengeofiction/%i/ogf-settings.env
+ExecStart=php $MEDIAWIKI_INSTALL/maintenance/run.php generateSitemap --fspath=$SITEMAP_PATH --identifier=$IDENTIFIER --urlpath=$URL_PATH $SKIP_REDIRECTS
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

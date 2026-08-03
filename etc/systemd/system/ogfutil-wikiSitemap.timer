@@ -1,0 +1,9 @@
+[Unit]
+Description=Generates sitemap for OpenGeofiction wiki: default
+
+[Timer]
+OnCalendar=20:24
+Unit=ogfutil-wikiSitemap@default.service
+
+[Install]
+WantedBy=timers.target
