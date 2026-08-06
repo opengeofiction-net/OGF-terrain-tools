@@ -1,0 +1,10 @@
+[Unit]
+Description=Regenerate Apache editor-IP RewriteMap (hourly)
+
+[Timer]
+# run hourly at :20
+OnCalendar=*:20
+Unit=ogfutil-editorIpAllowlist.service
+
+[Install]
+WantedBy=timers.target
