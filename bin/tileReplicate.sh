@@ -10,10 +10,14 @@
 BASE=/opt/opengeofiction/render
 
 # parse arguments
-if [ $# -ne 8 ]; then
+if [ $# -lt 8 ] || [ $# -gt 9 ]; then
 	cat <<USAGE
 Usage:
-	$0 style-name server db style-script transform-script copy-sequence-to zoom-min zoom-max
+	$0 style-name server db style-script transform-script copy-sequence-to zoom-min zoom-max [output]
+
+	output is the osm2pgsql output, pgsql (the default) or flex. osm-carto
+	v6.0.0 onwards needs flex, and then style-script is the flex lua config
+	and transform-script must be none.
 USAGE
 	exit 1
 fi
@@ -25,6 +29,7 @@ TRANSFORM_SCRIPT=$5
 COPY_SEQUENCE_TO=$6
 ZOOM_MIN=$7
 ZOOM_MAX=$8
+OUTPUT=${9:-pgsql}
 
 # Is there a style?
 style_opt="--style=${STYLE_SCRIPT}"
@@ -35,6 +40,18 @@ fi
 # Is there a tag transform script?
 transform_script_opt="--tag-transform-script=${TRANSFORM_SCRIPT}"
 if [ "${TRANSFORM_SCRIPT}" = "none" ]; then
+	transform_script_opt="";
+fi
+
+# The flex output takes its table and tag handling from the lua config passed
+# as the style, so the pgsql-only options are dropped
+output_opt=""
+hstore_opt="--hstore"
+multi_geometry_opt="--multi-geometry"
+if [ "${OUTPUT}" = "flex" ]; then
+	output_opt="--output=flex";
+	hstore_opt="";
+	multi_geometry_opt="";
 	transform_script_opt="";
 fi
 
@@ -90,8 +107,9 @@ do
 		# (removed --flat-nodes and added --expire-tiles, --expire-output)
 		osm2pgsql --database ${DB} --slim --append --number-processes=1 \
 		          --expire-tiles=${ZOOM_MIN}-${ZOOM_MAX} --expire-output=${efile} \
-		          --multi-geometry \
-		          --hstore \
+		          ${output_opt} \
+		          ${multi_geometry_opt} \
+		          ${hstore_opt} \
 		          ${style_opt} \
 		          ${transform_script_opt} \
 		          ${file}

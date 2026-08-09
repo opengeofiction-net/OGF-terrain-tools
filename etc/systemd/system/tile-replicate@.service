@@ -15,8 +15,9 @@ Environment=TRANSFORM_SCRIPT=none
 Environment=COPY_SEQUENCE_TO=/var/www/html/tile/public_html/%i-replication-in-state.txt
 Environment=ZOOM_MIN=5
 Environment=ZOOM_MAX=19
+Environment=OUTPUT=pgsql
 EnvironmentFile=-/opt/opengeofiction/map-styles/%i/ogf-settings.env
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/tileReplicate.sh %i $SERVER $DB $STYLE_SCRIPT $TRANSFORM_SCRIPT $COPY_SEQUENCE_TO $ZOOM_MIN $ZOOM_MAX
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/tileReplicate.sh %i $SERVER $DB $STYLE_SCRIPT $TRANSFORM_SCRIPT $COPY_SEQUENCE_TO $ZOOM_MIN $ZOOM_MAX $OUTPUT
 Restart=on-failure
 
 [Install]
