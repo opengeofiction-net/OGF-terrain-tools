@@ -96,6 +96,11 @@ done
 # between zones is written out in full. Two zones alone give an 88MB .ovr, and
 # 476KB once the nodata compresses away
 echo "=========== building shade.vrt ==========="
+# The .ovr has to go first. gdalbuildvrt -overwrite replaces the VRT but leaves
+# the overviews alone, and gdaladdo then tries to update them - if the band
+# count has changed since, as it did moving from greyscale to RGBA, that is an
+# "Illegal band" error and a segfault rather than a rebuild
+rm -f ${BASE}/shade.vrt.ovr
 gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
 gdaladdo -r average --config COMPRESS_OVERVIEW DEFLATE \
 	${BASE}/shade.vrt 2 4 8 16 32 64 128 256 512
