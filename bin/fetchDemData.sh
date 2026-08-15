@@ -80,9 +80,13 @@ psql -lqt | cut -d\| -f1 | grep -qw ${DB} || createdb -E UTF8 ${DB}
 psql -d ${DB} -qc "CREATE EXTENSION IF NOT EXISTS postgis"
 psql -d ${DB} -qc "DROP VIEW IF EXISTS contours"
 
-osmium cat ${BASE}/contours/contours-*.osm.pbf --overwrite -o ${BASE}/contours-all.osm.pbf
+# merge, not cat: osm2pgsql needs the input ordered, and cat concatenates, so
+# the second zone's nodes follow the first zone's ways. Each zone is generated
+# into its own id block, so a streaming merge is safe and there is no need to
+# sort the whole lot in memory
+osmium merge ${BASE}/contours/contours-*.osm.pbf --overwrite -o ${BASE}/contours-all.osm.pbf
 osm2pgsql --database ${DB} --create --style ${STYLE} \
-	--cache 2500 --number-processes=4 \
+	--number-processes=4 \
 	${BASE}/contours-all.osm.pbf
 rm -f ${BASE}/contours-all.osm.pbf
 
