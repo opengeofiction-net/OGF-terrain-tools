@@ -1,0 +1,8 @@
+# osm2pgsql style for the OGF contour data used by the cyclogf DEM layers.
+#
+# The contours are phyghtmap output, tagging ways ele / contour / contour_ext,
+# where the cyclosm style wants a height column. Only ele is kept here, and the
+# contours view maps it to height - see bin/fetchDemData.sh
+#
+# OsmType  Tag   DataType  Flags
+node,way   ele   int4      linear
