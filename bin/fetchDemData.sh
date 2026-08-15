@@ -20,7 +20,7 @@ SRC=https://ogfsrtm.rent-a-planet.com
 STYLE=/opt/opengeofiction/OGF-terrain-tools/etc/cyclogf_contours.style
 DB=contours
 
-mkdir -p ${BASE}/zips ${BASE}/hillshade ${BASE}/contours
+mkdir -p ${BASE}/zips ${BASE}/hillshade ${BASE}/contours ${BASE}/sorted
 
 # The zone list, either from the arguments or from the contours listing. The
 # combined zone is a stale 2023 artefact and is skipped
@@ -57,6 +57,16 @@ for ZONE in ${ZONES}; do
 		echo "extracting hillshade-90.tif"
 		unzip -p ${ZIP} '*/hillshade-90.tif' > ${TIF}
 	fi
+
+	# The generator writes node and way blocks interleaved, so each file needs
+	# sorting before osm2pgsql, or the merge below, will take it. Sorting per
+	# zone keeps the memory to the largest single zone, rather than the lot,
+	# and the result is kept so it is only redone when the download changes
+	SORTED=${BASE}/sorted/${ZONE}.osm.pbf
+	if [ ! -f ${SORTED} ] || [ ${PBF} -nt ${SORTED} ]; then
+		echo "sorting contours"
+		osmium sort ${PBF} --overwrite -o ${SORTED}
+	fi
 done
 
 # ----------- hillshade -----------------
@@ -81,10 +91,10 @@ psql -d ${DB} -qc "CREATE EXTENSION IF NOT EXISTS postgis"
 psql -d ${DB} -qc "DROP VIEW IF EXISTS contours"
 
 # merge, not cat: osm2pgsql needs the input ordered, and cat concatenates, so
-# the second zone's nodes follow the first zone's ways. Each zone is generated
-# into its own id block, so a streaming merge is safe and there is no need to
-# sort the whole lot in memory
-osmium merge ${BASE}/contours/contours-*.osm.pbf --overwrite -o ${BASE}/contours-all.osm.pbf
+# the second zone's nodes would follow the first zone's ways. The merge streams
+# the already sorted per-zone files, and each zone has its own id block, so
+# there is nothing to deduplicate
+osmium merge ${BASE}/sorted/*.osm.pbf --overwrite -o ${BASE}/contours-all.osm.pbf
 osm2pgsql --database ${DB} --create --style ${STYLE} \
 	--number-processes=4 \
 	${BASE}/contours-all.osm.pbf
