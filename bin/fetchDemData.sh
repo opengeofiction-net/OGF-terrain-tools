@@ -18,9 +18,10 @@ set -e
 BASE=/opt/opengeofiction/dem
 SRC=https://ogfsrtm.rent-a-planet.com
 STYLE=/opt/opengeofiction/OGF-terrain-tools/etc/cyclogf_contours.style
+RAMP=/opt/opengeofiction/map-styles/cyclogf/dem/shade.ramp
 DB=contours
 
-mkdir -p ${BASE}/zips ${BASE}/hillshade ${BASE}/contours ${BASE}/sorted
+mkdir -p ${BASE}/zips ${BASE}/hillshade ${BASE}/shade ${BASE}/contours ${BASE}/sorted
 
 # The zone list, either from the arguments or from the contours listing. The
 # combined zone is a stale 2023 artefact and is skipped
@@ -58,6 +59,18 @@ for ZONE in ${ZONES}; do
 		unzip -p ${ZIP} '*/hillshade-90.tif' > ${TIF}
 	fi
 
+	# The greyscale hillshade cannot be used directly. gdaldem gives flat ground
+	# a valid mid grey, around 180, not nodata - for gobras that is 98% of the
+	# raster - so compositing it would darken everything inside the zone's
+	# rectangle, sea included, with a hard edge at the boundary. The cyclosm
+	# ramp turns it into RGBA, flat ground fully transparent and only slopes
+	# shaded, which is also a good deal smaller
+	SHADE=${BASE}/shade/${ZONE}.tif
+	if [ ! -f ${SHADE} ] || [ ${TIF} -nt ${SHADE} ] || [ ${RAMP} -nt ${SHADE} ]; then
+		echo "applying the shade ramp"
+		gdaldem color-relief -alpha -q -co COMPRESS=DEFLATE ${TIF} ${RAMP} ${SHADE}
+	fi
+
 	# The generator writes node and way blocks interleaved, so each file needs
 	# sorting before osm2pgsql, or the merge below, will take it. Sorting per
 	# zone keeps the memory to the largest single zone, rather than the lot,
@@ -78,7 +91,7 @@ done
 # between zones is written out in full. Two zones alone give an 88MB .ovr, and
 # 476KB once the nodata compresses away
 echo "=========== building shade.vrt ==========="
-gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/hillshade/*.tif
+gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
 gdaladdo -r average --config COMPRESS_OVERVIEW DEFLATE \
 	${BASE}/shade.vrt 2 4 8 16 32 64 128 256 512
 
