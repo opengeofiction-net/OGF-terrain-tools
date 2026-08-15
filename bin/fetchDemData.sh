@@ -68,7 +68,12 @@ for ZONE in ${ZONES}; do
 	SHADE=${BASE}/shade/${ZONE}.tif
 	if [ ! -f ${SHADE} ] || [ ${TIF} -nt ${SHADE} ] || [ ${RAMP} -nt ${SHADE} ]; then
 		echo "applying the shade ramp"
-		gdaldem color-relief -alpha -q -co COMPRESS=DEFLATE ${TIF} ${RAMP} ${SHADE}
+		# Tiled, not the gdal default of one scanline per block. Rendering reads
+		# small windows at random, and a striped file has to inflate a full
+		# 5000 pixel wide strip for each - measured 4x slower
+		gdaldem color-relief -alpha -q ${TIF} ${RAMP} ${SHADE} \
+			-co TILED=YES -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 \
+			-co COMPRESS=DEFLATE -co PREDICTOR=2
 	fi
 
 	# The generator writes node and way blocks interleaved, so each file needs
