@@ -4,7 +4,7 @@ Description=Forces render of lowzoom tiles, for %i
 [Service]
 User=_renderd
 Group=_renderd
-ExecStart=render_list --all --force --map=%i --min-zoom=0 --max-zoom=4
+ExecStart=render_list --all --force --map=%i --min-zoom=0 --max-zoom=5
 
 [Install]
 WantedBy=default.target
