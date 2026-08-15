@@ -1,0 +1,15 @@
+#
+#  Systemd timer file to refresh the DEM data for %i
+#
+
+[Unit]
+Description=Refreshes the DEM hillshade and contours, for %i
+RefuseManualStart=no
+
+[Timer]
+# run at 05:05 on the 5th of the month
+OnCalendar=*-*-05 05:05:00
+Unit=tile-refresh-dem@%i.service
+
+[Install]
+WantedBy=timers.target

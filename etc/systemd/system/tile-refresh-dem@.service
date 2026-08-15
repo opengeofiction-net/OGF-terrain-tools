@@ -1,0 +1,29 @@
+#
+#  Systemd service file to refresh the DEM data for %i
+#
+#  The data is shared, not per style - one dem directory and one contours
+#  database - so only enable this for one style.
+#
+
+[Unit]
+Description=Refresh the DEM hillshade and contours for %i
+Wants=postgresql.service
+After=postgresql.service
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+Environment=MIN_ZOOM=6
+Environment=MAX_ZOOM=12
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/fetchDemData.sh %i
+# renderd holds the vrt open, so it has to be restarted before the re-render, or
+# the new tiles are drawn from the old raster. The + runs this as root
+ExecStartPost=+/usr/bin/systemctl try-restart renderd
+ExecStartPost=/opt/opengeofiction/OGF-terrain-tools/bin/renderDemZones.sh %i
+# The re-render of a changed zone runs for as long as it takes
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=default.target
