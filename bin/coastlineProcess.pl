@@ -15,6 +15,7 @@ use File::Path;
 
 sub exitScript($$);
 sub housekeeping($$);
+sub housekeepingHistoric($$);
 sub exportOverpassConvert($$$);
 sub buildOverpassQuery($$$);
 sub fileExport_Overpass($$$);
@@ -22,6 +23,7 @@ sub validateCoastline($$$$$);
 sub validateCoastlineDb($$);
 sub saveToJSON($$);
 sub publishFile($$);
+sub publishHistoric($$);
 sub createShapefilePublish($$$$$);
 
 STDOUT->autoflush(1);
@@ -50,6 +52,23 @@ my $now       = time;
 my $started   = strftime '%Y%m%d%H%M%S', gmtime $now;
 my $startedat = strftime '%Y-%m-%d %H:%M:%S UTC', gmtime $now;
 housekeeping $OUTPUT_DIR, $now;
+
+# Historic files are stamped with the Thursday which ends the current weekly
+# period, mirroring the Thursday alignment of backupPlanet.sh, so that a
+# historic coastline pairs with the weekly planet backup of the same date. A run
+# on a Thursday is already past the boundary, so belongs to the following week -
+# which keeps the coastline no newer than the planet it pairs with
+my @gmnow = gmtime $now;
+my $daysToThu = (4 - $gmnow[6] + 7) % 7;
+$daysToThu = 7 if( $daysToThu == 0 );
+my $HISTORIC_DATE = strftime '%Y%m%d', gmtime( $now + $daysToThu * 86400 );
+my $HISTORIC_DIR = $PUBLISH_DIR ? "$PUBLISH_DIR/historic" : undef;
+my @HISTORIC_LAYERS = ( 'water-polygons-split-3857', 'simplified-water-polygons-split-3857' );
+if( defined $HISTORIC_DIR )
+{
+	mkdir $HISTORIC_DIR if( ! -d $HISTORIC_DIR );
+	housekeepingHistoric $HISTORIC_DIR, $now;
+}
 
 # system load - do not continue coastline process if a backup is running
 my $LOCKFILE="$BASE/backup/backup.lock";
@@ -200,6 +219,7 @@ if( -f $osmFile )
 		my $simplify = 25;
 		
 		($changed, $simplify) = createShapefilePublish $dbFile, 'water-polygons-split-3857', 'water_polygons.shp', 'water_polygons', 0;
+		my $waterChanged = $changed;
 		if( $changed )
 		{
 			(undef, $simplify) = createShapefilePublish $dbFile, 'simplified-water-polygons-split-3857', 'simplified_water_polygons.shp', 'water_polygons', 25;
@@ -216,6 +236,12 @@ if( -f $osmFile )
 		{
 			createShapefilePublish $dbFile, 'complete-coastline-simplified-3857', 'complete-coastline-simplified.shp', 'rings', 1000;
 		}
+		
+		# archive the shapefiles the renderers use, for this weekly period. Done
+		# here rather than in createShapefilePublish as the simplified variant is
+		# only rebuilt when the unsimplified one changed, so a quiet week would
+		# otherwise leave it without a file
+		publishHistoric $_, $waterChanged foreach( @HISTORIC_LAYERS );
 
 		exitScript 0, "complete\n";
 	}
@@ -248,6 +274,25 @@ sub housekeeping($$)
 	while( my $file = readdir $dh )
 	{
 		next unless( $file =~ /\d{14}/ );
+		if( $now - (stat "$dir/$file")[9] > $KEEP_FOR )
+		{
+			print "deleting: $dir/$file\n";
+			unlink "$dir/$file";
+		}
+	}
+	closedir $dh;
+}
+
+sub housekeepingHistoric($$)
+{
+	my($dir, $now) = @_;
+	my $KEEP_FOR = 60 * 60 * 24 * 7 * 28; # six months, plus a fortnight of slack
+	my $dh;
+	
+	opendir $dh, $dir;
+	while( my $file = readdir $dh )
+	{
+		next unless( $file =~ /-\d{8}\.zip$/ );
 		if( $now - (stat "$dir/$file")[9] > $KEEP_FOR )
 		{
 			print "deleting: $dir/$file\n";
@@ -530,6 +575,24 @@ sub publishFile($$)
 	{
 		print "publish to: $publishFile\n";
 		copy $file, $publishFile;
+	}
+}
+
+sub publishHistoric($$)
+{
+	my($dir, $changed) = @_;
+	
+	my $file = "$dir.zip";
+	return unless( defined $HISTORIC_DIR and -f $file );
+	my $dest = "$HISTORIC_DIR/$dir-$HISTORIC_DATE.zip";
+	
+	# overwrite through the week on each valid change, so the file left at the end
+	# of the period is the last valid one. When nothing has changed only write it
+	# if the period has no file yet, so that every week has one
+	if( $changed or ! -f $dest )
+	{
+		print "publish historic to: $dest\n";
+		copy $file, $dest;
 	}
 }
 
