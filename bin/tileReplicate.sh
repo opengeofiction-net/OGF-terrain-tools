@@ -31,6 +31,12 @@ ZOOM_MIN=$7
 ZOOM_MAX=$8
 OUTPUT=${9:-pgsql}
 
+# LAG comes from the environment, not the arguments, so that a lagged style
+# needs nothing but its own ogf-settings.env. Unset, or none, replicates
+# normally. Otherwise it is anything GNU date understands as an offset, so
+# "6 months" holds the database that far behind the API
+LAG=${LAG:-none}
+
 # Is there a style?
 style_opt="--style=${STYLE_SCRIPT}"
 if [ "${STYLE_SCRIPT}" = "none" ]; then
@@ -88,8 +94,17 @@ do
 	# Save sequence file so we can rollback if an error occurs
 	cp sequence.txt sequence-prev.txt
 
+	# A lagged style stops at a cutoff rather than catching up to now. Worked
+	# out each time round, so the cutoff moves with the clock. Needs pyosmium
+	# 4.1 or later for --end-date, which on Debian 13 means trixie-backports
+	end_date_opt=""
+	if [ "${LAG}" != "none" ]; then
+		end_date_opt="--end-date=$(date -u -d "${LAG} ago" +%Y-%m-%dT%H:%M:%SZ)"
+		echo "lagging by ${LAG}, ${end_date_opt}"
+	fi
+
 	# Fetch the next set of changes
-	pyosmium-get-changes -vv --server=${SERVER} --sequence-file=sequence.txt --outfile=${file} --size=10
+	pyosmium-get-changes -vv --server=${SERVER} --sequence-file=sequence.txt --outfile=${file} --size=10 ${end_date_opt}
 
 	# Save exit status
 	status=$?
