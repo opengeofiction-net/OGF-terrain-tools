@@ -112,6 +112,18 @@ do
 	# Check for errors
 	if [ $status -eq 0 ]
 	then
+		# A lagged style which has caught up to its cutoff is handed an empty
+		# diff and an unchanged sequence, where a current style would get the
+		# "no new data" of status 3. Without this the loop spins, applying
+		# nothing over and over
+		if [ "$(cat sequence.txt)" = "$(cat sequence-prev.txt)" ]
+		then
+			echo "At the lag cutoff, nothing new. Sleeping..."
+			rm -f ${file} ${efile} sequence-prev.txt
+			sleep 30
+			continue
+		fi
+
 		# Enable exit on error
 		set -e
 
