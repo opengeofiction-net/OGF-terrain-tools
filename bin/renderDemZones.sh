@@ -10,15 +10,19 @@
 # Zooms 0-5 are left to tile-render-lowzoom, which forces them twice daily.
 # Override the rendered range with MIN_ZOOM and MAX_ZOOM.
 #
-# Above MAX_ZOOM the tiles are marked dirty rather than rendered, out to
-# EXPIRE_MAX_ZOOM: mod_tile keeps serving what it has and re-renders in the
-# background, which is right for a change to a background hillshade. Without
-# this a zone's high zooms keep serving the old shading until something else
-# happens to expire them.
+# Above MAX_ZOOM the cached tiles over the changed zones are marked dirty
+# rather than rendered: mod_tile keeps serving what it has and re-renders
+# behind the reader, which is right for a change to a background hillshade.
 #
-# EXPIRE_MAX_ZOOM stops at 17 because the cost is geometric - covering a six by
-# four degree zone takes 12,428 metatiles at z16, 49,710 at z17 and 795,364 at
-# z19, and by then the hillshade is a faint background under everything else.
+# Without this they keep the old shading for up to three days. With no
+# planet-import-complete file mod_tile makes a timestamp up - now minus three
+# days, from getPlanetTime() in store_file.c - so a tile is treated as expired
+# only once it is that old. Which leaves the recently rendered tiles stale
+# longest, and those are the ones people are looking at.
+#
+# demExpireTiles.py sweeps the cache for the tiles which exist, in one pass for
+# every zone, so this costs a readdir rather than the 795,364 stat calls that
+# enumerating one zone's z19 footprint would take.
 #
 # changed-zones carries the footprint alongside each zone name, recorded by
 # fetchDemData.sh. A zone which has been taken out of the render has no raster
@@ -33,10 +37,11 @@ fi
 STYLE=$1
 
 BASE=/opt/opengeofiction/dem
+TOOLS=${TOOLS:-/opt/opengeofiction/OGF-terrain-tools}
 CHANGED_ZONES=${BASE}/changed-zones
 MIN_ZOOM=${MIN_ZOOM:-6}
 MAX_ZOOM=${MAX_ZOOM:-12}
-EXPIRE_MAX_ZOOM=${EXPIRE_MAX_ZOOM:-17}
+EXPIRE=${EXPIRE:-yes}
 
 # Nothing changed, so nothing to re-render
 [ -s ${CHANGED_ZONES} ] || exit 0
@@ -63,34 +68,16 @@ print(min(lons), min(lats), max(lons), max(lats))')
 		-w ${MINLON} -W ${MAXLON} -g ${MINLAT} -G ${MAXLAT} \
 		--max-load=6 --num-threads=2
 
-	# and mark the zooms above dirty, one tile per metatile since that is the
-	# unit mod_tile stores and expires
-	EXPIRE_FROM=$((MAX_ZOOM + 1))
-	if [ ${EXPIRE_FROM} -le ${EXPIRE_MAX_ZOOM} ]; then
-		echo "  marking z${EXPIRE_FROM}-${EXPIRE_MAX_ZOOM} dirty"
-		python3 - ${EXPIRE_FROM} ${EXPIRE_MAX_ZOOM} \
-			${MINLON} ${MINLAT} ${MAXLON} ${MAXLAT} <<'PY' |
-import math, sys
-z0, z1 = int(sys.argv[1]), int(sys.argv[2])
-w, s, e, n = (float(v) for v in sys.argv[3:7])
-def xtile(lon, z):
-    return int((lon + 180.0) / 360.0 * 2 ** z)
-def ytile(lat, z):
-    r = math.radians(max(min(lat, 85.05112878), -85.05112878))
-    return int((1 - math.asinh(math.tan(r)) / math.pi) / 2 * 2 ** z)
-for z in range(z0, z1 + 1):
-    x0, x1 = xtile(w, z), xtile(e, z)
-    y0, y1 = ytile(n, z), ytile(s, z)
-    # step 8: one tile names the metatile which holds it
-    for x in range(x0 - x0 % 8, x1 + 1, 8):
-        for y in range(y0 - y0 % 8, y1 + 1, 8):
-            print(f'{z}/{x}/{y}')
-PY
-		render_expired --map=${STYLE} --touch-from=${EXPIRE_FROM} \
-			--min-zoom=${EXPIRE_FROM} --max-zoom=${EXPIRE_MAX_ZOOM} \
-			--no-progress
-	fi
 done < ${CHANGED_ZONES}
+
+# and the zooms above, in one sweep of the cache
+if [ "${EXPIRE}" = "yes" ]; then
+	EXPIRE_FROM=$((MAX_ZOOM + 1))
+	echo "=========== marking z${EXPIRE_FROM} and above dirty ==========="
+	${TOOLS}/bin/demExpireTiles.py ${CHANGED_ZONES} ${STYLE} ${EXPIRE_FROM} |
+		render_expired --map=${STYLE} --touch-from=${EXPIRE_FROM} \
+			--min-zoom=${EXPIRE_FROM} --no-progress
+fi
 
 rm -f ${CHANGED_ZONES}
 echo "=========== done ==========="
