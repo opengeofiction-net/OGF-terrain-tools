@@ -41,6 +41,11 @@ SRC=${SRC:-https://data.opengeofiction.net/dem}
 # Which hillshade this style wants. z2 is the softer one, which is what cyclogf
 # reads; the topo layer uses z5. Same DEM, two strengths
 ZFACTOR=${ZFACTOR:-z2}
+# A VRT stops offering virtual overviews once one would fall below 256 pixels,
+# so the mosaic can use about eleven levels on its 587,114 pixel side. Going to
+# 1/2048 keeps a level available for each; past a source's own size they cost
+# almost nothing, every level being a quarter of the one before
+OVERVIEWS=${OVERVIEWS:-"2 4 8 16 32 64 128 256 512 1024 2048"}
 TOOLS=${TOOLS:-/opt/opengeofiction/OGF-terrain-tools}
 OSM2PGSQL_STYLE=${TOOLS}/etc/cyclogf_contours.style
 RAMP=${RAMP:-/opt/opengeofiction/map-styles/${STYLE}/dem/shade.ramp}
@@ -145,6 +150,21 @@ for ZONE in ${ZONES}; do
 		ZONE_CHANGED=yes
 	fi
 
+	# Overviews on the zone, not on the mosaic. A VRT with no overviews of its
+	# own exposes those of its sources, so building them here gives the same
+	# thing for the cost of the zone which changed rather than the cost of
+	# every zone held.
+	#
+	# They go inside the .tif, which is gdaladdo's default for a GeoTIFF it can
+	# write - there is no .ovr to look for, and asking gdalinfo is the way to
+	# tell. Internal is what we want anyway: an external .ovr would outlive the
+	# next colour-relief pass and be read as though it still described the file
+	if [ -n "${ZONE_CHANGED}" ] || ! gdalinfo ${SHADE} | grep -q "Overviews:"; then
+		echo "building overviews"
+		gdaladdo -r average -q --config COMPRESS_OVERVIEW DEFLATE \
+			${SHADE} ${OVERVIEWS}
+	fi
+
 	if [ -n "${ZONE_CHANGED}" ]; then
 		CHANGED="${CHANGED} ${ZONE}"
 		echo "${ZONE} $(footprint ${SHADE})" >> ${CHANGED_ZONES}.new
@@ -168,7 +188,7 @@ if [ -n "${REMOVALS}" ]; then
 		echo "=========== zone-${ZONE} has left the manifest ==========="
 		# the footprint has to be taken before the raster goes
 		echo "${ZONE} $(footprint ${SHADE})" >> ${CHANGED_ZONES}.new
-		rm -f ${SHADE} ${BASE}/hillshade/${ZONE}.tif \
+		rm -f ${SHADE} ${SHADE}.ovr ${BASE}/hillshade/${ZONE}.tif \
 			${BASE}/contours/contours-${ZONE}.osm.pbf \
 			${BASE}/sorted/${ZONE}.osm.pbf
 		REMOVED="${REMOVED} ${ZONE}"
@@ -187,22 +207,26 @@ fi
 echo "=========== changed:${CHANGED} ==========="
 
 # ----------- hillshade -----------------
-# One VRT over every zone held locally, with overviews so the low zooms do not
-# have to read the full resolution rasters.
+# One VRT over every zone held locally. The overviews the low zooms read are the
+# zones' own, built above as each was fetched - GDAL exposes the overviews of a
+# VRT's sources when the VRT has none of its own, and the result is identical:
+# over a zone at 1/2, 1/4, 1/8 and 1/16, not one pixel differs from the same
+# mosaic with its own .ovr.
 #
-# The .ovr has to go first. gdalbuildvrt -overwrite replaces the VRT but leaves
-# the overviews alone, and gdaladdo then tries to update them - if the band
-# count has changed since, that is an "Illegal band" error and a segfault.
+# Building them on the mosaic instead costs the whole planet every run. The VRT
+# spans the bounding box of every zone, 675 gigapixels across 1,149,105 by
+# 587,114, and gdaladdo rebuilds all of it whether one zone changed or thirty -
+# three and a half hours of a tile server, nightly, to redraw one island.
 #
-# COMPRESS_OVERVIEW is not optional either. The mosaic spans the bounding box of
-# every zone, which is most of the planet, and overviews are dense - the empty
-# space between zones is written out in full. Two zones alone give an 88MB .ovr,
-# and 476KB once the nodata compresses away
+# Nothing is lost to seams. Averaging windows would have to straddle two sources
+# for that, and no two zones are within 334km of each other.
+#
+# The mosaic .ovr has to go, and stay gone: an .ovr on the VRT takes precedence
+# over the sources' and would pin the low zooms to whatever was true when it was
+# built. gdalbuildvrt -overwrite leaves it in place, so it is removed here
 echo "=========== building shade.vrt ==========="
 rm -f ${BASE}/shade.vrt.ovr
 gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
-gdaladdo -r average --config COMPRESS_OVERVIEW DEFLATE \
-	${BASE}/shade.vrt 2 4 8 16 32 64 128 256 512
 
 # ----------- contours -----------------
 # Loaded from scratch, there being no incremental update to do, and no --slim for
