@@ -8,11 +8,8 @@ use Date::Format;
 use Encode;
 use JSON::XS;
 use OGF::Data::Context;
-use OGF::Geo::Topology;
 use OGF::Util::File;
-use OGF::Util::Line;
 use OGF::Util::Usage qw( usageInit usageError );
-use OGF::View::TileLayer;
 use URI::Escape;
 
 sub parseTimezone($);
