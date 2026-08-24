@@ -140,8 +140,8 @@ def main():
                         emitted += 1
                         break
 
-    print(f'  {emitted} of {walked} cached metatiles above z{args.min_zoom - 1} '
-          f'sit over a changed zone', file=sys.stderr)
+    print(f'  {emitted} of {walked} cached metatiles at z{args.min_zoom} and '
+          f'above sit over a changed zone', file=sys.stderr)
 
 
 if __name__ == '__main__':
