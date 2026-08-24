@@ -58,7 +58,9 @@ conversion, as it turns out.
 
 ## Licence
 
-Copyright &copy; 2017 Thilo Stapff and contributors.
+Copyright &copy; 2017-2020 Thilo Stapff
+
+Copyright &copy; 2020-2026 Lee Kindness and OpenGeofiction administrators
 
 Free software, on the same terms as Perl itself: either Perl version 5.16.0 or,
 at your option, any later version of Perl 5 you may have available.
