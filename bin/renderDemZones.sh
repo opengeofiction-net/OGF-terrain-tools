@@ -43,9 +43,24 @@ STYLE=$1
 BASE=/opt/opengeofiction/dem
 TOOLS=${TOOLS:-/opt/opengeofiction/OGF-terrain-tools}
 CHANGED_ZONES=${BASE}/changed-zones
+TILE_DIR=${TILE_DIR:-$(sed -n 's/^tile_dir=//p' /etc/renderd.conf 2>/dev/null | head -1)}
+TILE_DIR=${TILE_DIR:-/var/cache/renderd/tiles}
 MIN_ZOOM=${MIN_ZOOM:-0}
 TOUCH_FROM=${TOUCH_FROM:-0}
 MAX_LOAD=${MAX_LOAD:-6}
+
+# Run as whoever renderd writes tiles as. Marking a tile dirty sets its mtime
+# back twenty years, and utime() with an explicit time needs ownership - group
+# write does not do it. render_expired reports each refusal and exits 0 anyway,
+# so the wrong user is a run that looks clean and expires nothing: it printed
+# "Operation not permitted" 784 times before this check existed
+OWNER=$(stat -c %U "${TILE_DIR}/${STYLE}" 2>/dev/null || true)
+if [ -n "${OWNER}" ] && [ "${OWNER}" != "$(id -un)" ] && [ "$(id -u)" != 0 ]; then
+	echo "$0: tiles belong to ${OWNER} and this is $(id -un), which cannot" >&2
+	echo "  set their timestamps. Run it as ${OWNER}:" >&2
+	echo "    sudo runuser -u ${OWNER} -- $0 ${STYLE}" >&2
+	exit 1
+fi
 
 # Nothing changed, so nothing to expire
 [ -s ${CHANGED_ZONES} ] || exit 0
@@ -57,5 +72,8 @@ ${TOOLS}/bin/demExpireTiles.py ${CHANGED_ZONES} ${STYLE} ${MIN_ZOOM} |
 	render_expired --map=${STYLE} --min-zoom=${MIN_ZOOM} \
 		--touch-from=${TOUCH_FROM} --max-load=${MAX_LOAD} --no-progress
 
-rm -f ${CHANGED_ZONES}
+# Left in place if this account cannot remove it - the directory belongs to ogf
+# and the expiry does not. The next fetch replaces it either way
+rm -f ${CHANGED_ZONES} 2>/dev/null ||
+	echo "  ${CHANGED_ZONES} left in place, not ours to remove"
 echo "=========== done ==========="
