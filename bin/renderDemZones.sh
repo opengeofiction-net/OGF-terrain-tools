@@ -53,7 +53,12 @@ MAX_LOAD=${MAX_LOAD:-6}
 # back twenty years, and utime() with an explicit time needs ownership - group
 # write does not do it. render_expired reports each refusal and exits 0 anyway,
 # so the wrong user is a run that looks clean and expires nothing: it printed
-# "Operation not permitted" 784 times before this check existed
+# "Operation not permitted" 784 times before this check existed.
+#
+# The whole script runs as that user rather than only the expiry, because the
+# whole script is a tile cache operation: it reads changed-zones and renderd.conf
+# and walks the cache, all of which are world readable, and touches tiles, which
+# are not. Nothing in it writes anywhere else
 OWNER=$(stat -c %U "${TILE_DIR}/${STYLE}" 2>/dev/null || true)
 if [ -n "${OWNER}" ] && [ "${OWNER}" != "$(id -un)" ] && [ "$(id -u)" != 0 ]; then
 	echo "$0: tiles belong to ${OWNER} and this is $(id -un), which cannot" >&2
@@ -72,8 +77,9 @@ ${TOOLS}/bin/demExpireTiles.py ${CHANGED_ZONES} ${STYLE} ${MIN_ZOOM} |
 	render_expired --map=${STYLE} --min-zoom=${MIN_ZOOM} \
 		--touch-from=${TOUCH_FROM} --max-load=${MAX_LOAD} --no-progress
 
-# Left in place if this account cannot remove it - the directory belongs to ogf
-# and the expiry does not. The next fetch replaces it either way
-rm -f ${CHANGED_ZONES} 2>/dev/null ||
-	echo "  ${CHANGED_ZONES} left in place, not ours to remove"
+# changed-zones is not removed here. It belongs to fetchDemData.sh, which writes
+# it at the end of a run and removes it when nothing changed, so it is always
+# either current or gone - and this reads it rather than owning it. Leaving it
+# also makes a re-run repeat the same expiry, which is what you want from a step
+# that only marks tiles dirty
 echo "=========== done ==========="
