@@ -1,19 +1,26 @@
 #!/bin/bash
 #
-# Fetch the OGF contour and hillshade data used by the DEM layers, and load it.
+# Fetch the OGF elevation data used by the DEM layers, and load it.
 # Run as the ogf user, by tile-refresh-dem@<style>.timer, or by hand.
 #
-# The zones themselves are produced by a separate, manual process - see
-# Admin:How to add a new contour zone to ogf-topo
+# The zones are produced on the utility server - see Admin:Elevation process
 #
 # /opt/opengeofiction/OGF-terrain-tools/bin/fetchDemData.sh <style> [zone ...]
 #
-# With no zones named every published zone is fetched, the list being read from
-# the web server directory listing. Naming zones does just those. Either way the
-# downloads are only fetched when the published copy is newer, and the VRT and
-# the database are only rebuilt when something has actually changed.
+# With no zones named, the zones to load are whatever dem/active-zones.txt says.
+# That list is about rendering, not publishing: a zone can be published and
+# downloadable and still be left out of it, so what is on the server is not the
+# same question as what belongs on the map. Naming zones does just those, and
+# skips the removal pass.
 #
-# The zones which changed are left in dem/changed-zones, for renderDemZones.sh
+# Downloads only happen when the published copy is newer, and the VRT and the
+# database are only rebuilt when something has actually changed.
+#
+# The zones which changed are left in dem/changed-zones as
+# "<zone> <minlon> <minlat> <maxlon> <maxlat>", for renderDemZones.sh. The
+# footprint is recorded here rather than derived there because a zone which has
+# been removed no longer has a raster to derive it from, and its tiles are
+# exactly the ones which have to be redrawn.
 #
 # Note the data is shared, not per style: one dem directory and one contours
 # database, whatever %i says. Only enable the timer for one style.
@@ -27,14 +34,25 @@ fi
 STYLE=$1
 shift
 
-BASE=/opt/opengeofiction/dem
-SRC=https://ogfsrtm.rent-a-planet.com
-OSM2PGSQL_STYLE=/opt/opengeofiction/OGF-terrain-tools/etc/cyclogf_contours.style
-RAMP=/opt/opengeofiction/map-styles/${STYLE}/dem/shade.ramp
+# Overridable so the fetch and removal passes can be exercised against a copy
+# of the published tree, off the tile server
+BASE=${BASE:-/opt/opengeofiction/dem}
+SRC=${SRC:-https://data.opengeofiction.net/dem}
+# Which hillshade this style wants. z2 is the softer one, which is what cyclogf
+# reads; the topo layer uses z5. Same DEM, two strengths
+ZFACTOR=${ZFACTOR:-z2}
+# A VRT stops offering virtual overviews once one would fall below 256 pixels,
+# so the mosaic can use about eleven levels on its 587,114 pixel side. Going to
+# 1/2048 keeps a level available for each; past a source's own size they cost
+# almost nothing, every level being a quarter of the one before
+OVERVIEWS=${OVERVIEWS:-"2 4 8 16 32 64 128 256 512 1024 2048"}
+TOOLS=${TOOLS:-/opt/opengeofiction/OGF-terrain-tools}
+OSM2PGSQL_STYLE=${TOOLS}/etc/cyclogf_contours.style
+RAMP=${RAMP:-/opt/opengeofiction/map-styles/${STYLE}/dem/shade.ramp}
 CHANGED_ZONES=${BASE}/changed-zones
 DB=contours
 
-mkdir -p ${BASE}/zips ${BASE}/hillshade ${BASE}/shade ${BASE}/contours ${BASE}/sorted
+mkdir -p ${BASE}/hillshade ${BASE}/shade ${BASE}/contours
 
 # One run at a time. The timer and a manual run must not both be rebuilding the
 # VRT, or reloading the database, at once
@@ -48,7 +66,7 @@ fi
 
 # Fetch to a temporary file and only move it into place once it is there. curl
 # truncates its output on failure, so fetching straight to the destination would
-# leave an empty zip behind when the server is unreachable
+# leave an empty file behind when the server is unreachable
 # Returns: 0 fetched something new, 1 unchanged, 2 failed
 fetch() {
 	local url=$1 dest=$2 tmp=$2.tmp
@@ -67,51 +85,51 @@ fetch() {
 	return 1
 }
 
-# The zone list, either from the arguments or from the contours listing. The
-# combined zone is a stale 2023 artefact and is skipped
+# The footprint of a zone's raster, in lat/lon
+footprint() {
+	gdalinfo -json $1 | python3 -c '
+import json, sys
+extent = json.load(sys.stdin)["wgs84Extent"]["coordinates"][0]
+lons = [p[0] for p in extent]
+lats = [p[1] for p in extent]
+print(min(lons), min(lats), max(lons), max(lats))'
+}
+
+# The zone list. Either the arguments, or the manifest - and the manifest is
+# fetched rather than assumed: if it cannot be read, nothing is done, because
+# every zone would otherwise look like it had been removed
+REMOVALS=yes
 if [ $# -gt 0 ]; then
 	ZONES="$@"
+	REMOVALS=
 else
-	LISTING=$(curl -sS --fail --retry 3 --retry-delay 5 ${SRC}/contours/) || {
-		echo "could not read the zone listing, nothing to do" >&2
+	MANIFEST=${BASE}/active-zones.txt
+	if ! fetch ${SRC}/active-zones.txt ${MANIFEST} && [ ! -s ${MANIFEST} ]; then
+		echo "could not read ${SRC}/active-zones.txt, nothing to do" >&2
 		exit 1
-	}
-	ZONES=$(echo "${LISTING}" \
-		| grep -o 'contours-[a-z0-9]*\.osm\.pbf' \
-		| sed 's/contours-//; s/\.osm\.pbf//' \
-		| grep -vx combined \
-		| sort -u)
-	[ -n "${ZONES}" ] || { echo "the zone listing was empty, nothing to do" >&2; exit 1; }
+	fi
+	ZONES=$(grep -v '^#' ${MANIFEST} | tr -d ' \t' | grep -v '^$' | sort -u)
+	[ -n "${ZONES}" ] || { echo "the manifest lists no zones, nothing to do" >&2; exit 1; }
 fi
 echo "zones: $(echo ${ZONES} | tr '\n' ' ')"
 
 CHANGED=""
 FAILED=""
+: > ${CHANGED_ZONES}.new
 
 for ZONE in ${ZONES}; do
 	echo "=========== zone-${ZONE} ==========="
 	ZONE_CHANGED=""
 
-	ZIP=${BASE}/zips/tiff-${ZONE}.zip
-	rc=0; fetch ${SRC}/tiff-files/tiff-${ZONE}.zip ${ZIP} || rc=$?
+	TIF=${BASE}/hillshade/${ZONE}.tif
+	rc=0; fetch ${SRC}/${ZONE}/hillshade-${ZFACTOR}.tif ${TIF} || rc=$?
 	[ ${rc} -eq 0 ] && ZONE_CHANGED=yes
 	[ ${rc} -eq 2 ] && { FAILED="${FAILED} ${ZONE}"; continue; }
 
 	PBF=${BASE}/contours/contours-${ZONE}.osm.pbf
-	rc=0; fetch ${SRC}/contours/contours-${ZONE}.osm.pbf ${PBF} || rc=$?
+	rc=0; fetch ${SRC}/${ZONE}/contours-${ZONE}.osm.pbf ${PBF} || rc=$?
 	[ ${rc} -eq 0 ] && ZONE_CHANGED=yes
 	[ ${rc} -eq 2 ] && { FAILED="${FAILED} ${ZONE}"; continue; }
-
-	# Only the 90m hillshade is used, the rest of the zip being the working
-	# files of the generation process, and the other resolutions which the VRT
-	# overviews replace. -p as every zip holds the same file name, under the
-	# old geofictician paths
-	TIF=${BASE}/hillshade/${ZONE}.tif
-	if [ ! -f ${TIF} ] || [ ${ZIP} -nt ${TIF} ]; then
-		echo "extracting hillshade-90.tif"
-		unzip -p ${ZIP} '*/hillshade-90.tif' > ${TIF}
-		ZONE_CHANGED=yes
-	fi
 
 	# The greyscale hillshade cannot be used directly. gdaldem gives flat ground
 	# a valid mid grey, around 180, not nodata - for gobras that is 98% of the
@@ -121,8 +139,8 @@ for ZONE in ${ZONES}; do
 	# shaded, which is also a good deal smaller.
 	#
 	# Tiled, not the gdal default of one scanline per block: rendering reads
-	# small windows at random, and a striped file has to inflate a full 5000
-	# pixel wide strip for each
+	# small windows at random, and a striped file has to inflate a full strip
+	# for each
 	SHADE=${BASE}/shade/${ZONE}.tif
 	if [ ! -f ${SHADE} ] || [ ${TIF} -nt ${SHADE} ] || [ ${RAMP} -nt ${SHADE} ]; then
 		echo "applying the shade ramp"
@@ -132,62 +150,119 @@ for ZONE in ${ZONES}; do
 		ZONE_CHANGED=yes
 	fi
 
-	# The generator writes node and way blocks interleaved, so each file needs
-	# sorting before osm2pgsql, or the merge below, will take it. Sorting per
-	# zone keeps the memory to the largest single zone, rather than the lot,
-	# and the result is kept so it is only redone when the download changes
-	SORTED=${BASE}/sorted/${ZONE}.osm.pbf
-	if [ ! -f ${SORTED} ] || [ ${PBF} -nt ${SORTED} ]; then
-		echo "sorting contours"
-		osmium sort ${PBF} --overwrite -o ${SORTED}
-		ZONE_CHANGED=yes
+	# Overviews on the zone, not on the mosaic. A VRT with no overviews of its
+	# own exposes those of its sources, so building them here gives the same
+	# thing for the cost of the zone which changed rather than the cost of
+	# every zone held.
+	#
+	# They go inside the .tif, which is gdaladdo's default for a GeoTIFF it can
+	# write - there is no .ovr to look for, and asking gdalinfo is the way to
+	# tell. Internal is what we want anyway: an external .ovr would outlive the
+	# next colour-relief pass and be read as though it still described the file
+	if [ -n "${ZONE_CHANGED}" ] || ! gdalinfo ${SHADE} | grep -q "Overviews:"; then
+		echo "building overviews"
+		gdaladdo -r average -q --config COMPRESS_OVERVIEW DEFLATE \
+			${SHADE} ${OVERVIEWS}
 	fi
 
-	[ -n "${ZONE_CHANGED}" ] && CHANGED="${CHANGED} ${ZONE}"
+	if [ -n "${ZONE_CHANGED}" ]; then
+		CHANGED="${CHANGED} ${ZONE}"
+		echo "${ZONE} $(footprint ${SHADE})" >> ${CHANGED_ZONES}.new
+	fi
 done
 
 [ -n "${FAILED}" ] && echo "WARNING: zones which could not be fetched:${FAILED}" >&2
+
+# ----------- zones which have left the manifest -----------------
+# A zone taken out of the render has to be taken off the map, not just stopped
+# from updating: its rasters and its contours go, and its footprint is redrawn.
+# Skipped when zones were named on the command line, where the argument list says
+# nothing about what should no longer be here.
+REMOVED=""
+if [ -n "${REMOVALS}" ]; then
+	for SHADE in ${BASE}/shade/*.tif; do
+		[ -e "${SHADE}" ] || continue
+		ZONE=$(basename ${SHADE} .tif)
+		grep -qxF "${ZONE}" <<<"${ZONES}" && continue
+
+		echo "=========== zone-${ZONE} has left the manifest ==========="
+		# the footprint has to be taken before the raster goes
+		echo "${ZONE} $(footprint ${SHADE})" >> ${CHANGED_ZONES}.new
+		rm -f ${SHADE} ${SHADE}.ovr ${BASE}/hillshade/${ZONE}.tif \
+			${BASE}/contours/contours-${ZONE}.osm.pbf \
+			${BASE}/sorted/${ZONE}.osm.pbf
+		REMOVED="${REMOVED} ${ZONE}"
+		CHANGED="${CHANGED} ${ZONE}"
+	done
+fi
+[ -n "${REMOVED}" ] && echo "removed:${REMOVED}"
 
 # Normally there is nothing new, and the rest is not worth doing. The existing
 # data is left exactly as it is
 if [ -z "${CHANGED}" ]; then
 	echo "=========== no zones changed ==========="
-	rm -f ${CHANGED_ZONES}
+	rm -f ${CHANGED_ZONES} ${CHANGED_ZONES}.new
 	exit 0
 fi
 echo "=========== changed:${CHANGED} ==========="
 
 # ----------- hillshade -----------------
-# One VRT over every zone held locally, with overviews so the low zooms do not
-# have to read the 90m rasters.
+# One VRT over every zone held locally. The overviews the low zooms read are the
+# zones' own, built above as each was fetched - GDAL exposes the overviews of a
+# VRT's sources when the VRT has none of its own, and the result is identical:
+# over a zone at 1/2, 1/4, 1/8 and 1/16, not one pixel differs from the same
+# mosaic with its own .ovr.
 #
-# The .ovr has to go first. gdalbuildvrt -overwrite replaces the VRT but leaves
-# the overviews alone, and gdaladdo then tries to update them - if the band
-# count has changed since, that is an "Illegal band" error and a segfault.
+# Building them on the mosaic instead costs the whole planet every run. The VRT
+# spans the bounding box of every zone, 675 gigapixels across 1,149,105 by
+# 587,114, and gdaladdo rebuilds all of it whether one zone changed or thirty -
+# three and a half hours of a tile server, nightly, to redraw one island.
 #
-# COMPRESS_OVERVIEW is not optional either. The mosaic spans the bounding box of
-# every zone, which is most of the planet, and overviews are dense - the empty
-# space between zones is written out in full. Two zones alone give an 88MB .ovr,
-# and 476KB once the nodata compresses away
+# Nothing is lost to seams. Averaging windows would have to straddle two sources
+# for that, and no two zones are within 334km of each other.
+#
+# The mosaic .ovr has to go, and stay gone: an .ovr on the VRT takes precedence
+# over the sources' and would pin the low zooms to whatever was true when it was
+# built. gdalbuildvrt -overwrite leaves it in place, so it is removed here
 echo "=========== building shade.vrt ==========="
 rm -f ${BASE}/shade.vrt.ovr
 gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
-gdaladdo -r average --config COMPRESS_OVERVIEW DEFLATE \
-	${BASE}/shade.vrt 2 4 8 16 32 64 128 256 512
 
 # ----------- contours -----------------
-# Loaded from scratch, there being no incremental update to do. No --slim for
-# the same reason, which keeps the database a good deal smaller
+# Loaded from scratch, there being no incremental update to do, and no --slim for
+# the same reason, which keeps the database a good deal smaller.
+#
+# The published files come out of demContoursToOsm.py sorted by type and id, so
+# there is nothing to sort here. Older files, from phyghtmap, interleaved node
+# and way blocks and needed sorting first, so it is checked rather than assumed -
+# osmium merge would otherwise fail halfway through the load
 echo "=========== loading contours ==========="
 psql -lqt | cut -d\| -f1 | grep -qw ${DB} || createdb -E UTF8 ${DB}
 psql -d ${DB} -qc "CREATE EXTENSION IF NOT EXISTS postgis"
 psql -d ${DB} -qc "DROP VIEW IF EXISTS contours"
 
+MERGE_FILES=""
+mkdir -p ${BASE}/sorted
+for PBF in ${BASE}/contours/*.osm.pbf; do
+	[ -e "${PBF}" ] || continue
+	ZONE=$(basename ${PBF} .osm.pbf); ZONE=${ZONE#contours-}
+	if osmium fileinfo -e ${PBF} | grep -q 'Objects ordered (by type and id): yes'; then
+		MERGE_FILES="${MERGE_FILES} ${PBF}"
+		continue
+	fi
+	SORTED=${BASE}/sorted/${ZONE}.osm.pbf
+	if [ ! -f ${SORTED} ] || [ ${PBF} -nt ${SORTED} ]; then
+		echo "  ${ZONE}: not ordered, sorting"
+		osmium sort ${PBF} --overwrite -o ${SORTED}
+	fi
+	MERGE_FILES="${MERGE_FILES} ${SORTED}"
+done
+
 # merge, not cat: osm2pgsql needs the input ordered, and cat concatenates, so
 # the second zone's nodes would follow the first zone's ways. The merge streams
-# the already sorted per-zone files, and each zone has its own id block, so
-# there is nothing to deduplicate
-osmium merge ${BASE}/sorted/*.osm.pbf --overwrite -o ${BASE}/contours-all.osm.pbf
+# the per-zone files, and each zone has its own id block, so there is nothing to
+# deduplicate
+osmium merge ${MERGE_FILES} --overwrite -o ${BASE}/contours-all.osm.pbf
 osm2pgsql --database ${DB} --create --style ${OSM2PGSQL_STYLE} \
 	--number-processes=4 \
 	${BASE}/contours-all.osm.pbf
@@ -199,6 +274,6 @@ psql -d ${DB} -qc "CREATE VIEW contours AS \
 	SELECT way AS geometry, ele AS height FROM planet_osm_line WHERE ele IS NOT NULL"
 
 # Left for renderDemZones.sh, which runs after renderd has been restarted
-echo ${CHANGED} | tr ' ' '\n' | grep -v '^$' > ${CHANGED_ZONES}
+mv ${CHANGED_ZONES}.new ${CHANGED_ZONES}
 
 echo "=========== done ==========="

@@ -4,7 +4,6 @@ use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
 use strict;
 use warnings;
 use File::Copy;
-use OGF::Data::Context;
 use OGF::Util::File;
 use OGF::Util::Overpass;
 use OGF::Util::Usage qw( usageInit usageError );

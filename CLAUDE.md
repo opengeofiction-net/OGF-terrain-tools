@@ -4,55 +4,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-OGF-terrain-tools is a dual-purpose repository:
+Scripts, systemd units and configuration for running the OpenGeofiction
+platform: backups, tile rendering and replication, Overpass, coastline and
+elevation processing, territory polygons, monitoring.
 
-1. **Terrain Processing Tools**: Perl-based toolkit for converting OSM contour data into elevation tiles, SRTM-format height maps, and 3D terrain data for visualization
-2. **OGF Infrastructure Scripts**: Operational scripts for running and maintaining the OpenGeofiction platform, including database backups, tile rendering, Overpass API updates, and monitoring
+Not a Perl distribution, despite the history. There is nothing to install: it is
+checked out at `/opt/opengeofiction/OGF-terrain-tools` on each server and run
+from there, mostly by the units in `etc/systemd/system`.
 
-## Installation and Setup
+The infrastructure is documented in the admin wiki, built from the `docs`
+repository - `Admin:Elevation process`, `Admin:Coastline process`,
+`Admin:Creating a utility server` and so on. Those guides carry the reasoning;
+this file is the map of the code.
 
-```bash
-# Install the Perl module
-perl Makefile.PL
-make
-make install
+## Configuration
 
-# Configuration for terrain tools
-# Copy ogftools.sample.conf to one of:
-#   - Current directory
-#   - $HOME/.ogf/ogftools.conf
-#   - /etc/ogftools.conf
-# Then edit to set:
-#   - layer_path_prefix: Directory for output elevation tiles
-#   - terrain_color_map: Path to DEM_poster.cpt color palette file
-```
+Some Perl scripts read `ogftools.conf` from the working directory,
+`$HOME/.ogf/ogftools.conf` or `/etc/ogftools.conf` - copy
+`ogftools.sample.conf`. The Overpass-driven ones also want `$HOME/.osmtoolsrc`
+for the API user, password and url.
 
 ## Common Commands
 
-### Terrain Processing (Full Pipeline)
+### Elevation
+
+Contours are drawn by hand, one `.osm` per degree square under
+`/opt/opengeofiction/elevation/osm-squares/<zone>/`, and are the source of
+everything else. GDAL does the raster work; no Perl is involved.
 
 ```bash
-# Convert OSM contour files to contour tiles at zoom level 13
-perl bin/ogfElevation.pl 13 contours_01.osm contours_02.osm
+# on the utility server: every zone whose squares have changed
+bin/buildDemData.sh [zone ...]
 
-# Or run the complete pipeline with -c option (all steps automatically)
-perl bin/ogfElevation.pl -c 13 contours_01.osm contours_02.osm
-```
+# one zone, start to finish. KEEP_WORK=1 to keep the intermediates
+bin/buildDemZone.sh <zone>
 
-### Manual Step-by-Step Terrain Processing
+# a blank square for ground nobody has drawn
+bin/demMakeSquare.py <outdir> N42E017 S03W121
 
-```bash
-# Step 1: Convert contour tiles to elevation tiles
-perl bin/makeElevationFromContour.pl contour:OGF:13:5724-5768:5984-6030
+# squares back out of a DEM, for a zone whose source was lost
+bin/demRecoverSquares.py <dem.tif> <outdir> --water <water.osm.pbf>
 
-# Step 2: Reproject to SRTM 1x1 degree tiles
-perl bin/makeSrtmElevationTile.pl OGF:13 1200 bbox=83,-59,85.001,-57.999
-
-# Step 3: Create 3D elevation data for Web Worldwind
-perl bin/make3dElevation.pl level=9 size=256 bbox=83,-59,85.001,-57.999
-
-# Step 4: Create lower zoom levels and pack into ZIP
-perl bin/convertMapLevel.pl -sz 256,256 -zip elev:WebWW:9:352-364:2992-3015 0
+# on a tile server: fetch what was published and load it
+bin/fetchDemData.sh <style> [zone ...]
+bin/renderDemZones.sh <style>
 ```
 
 ### Operational Scripts
@@ -109,9 +104,6 @@ bin/dailyActivitySummary.pl
   # Generates daily activity reports
   # Creates geographic activity summaries
 
-bin/monthlyActivitySummary.pl
-  # Monthly aggregated activity reports
-
 bin/userList.pl
   # Exports user listing data
 
@@ -144,10 +136,10 @@ bin/parseSysStats.pl
   # Parses and analyzes system statistics
 
 bin/parseAccessLog.pl
-bin/apacheLogInvestigate.pl
-bin/debugAccessLog.pl
+  # Parses Apache access logs into a database. On cron on the API server,
+  # with checkUser.pl run against its output
 bin/debugDevelopmentLog.pl
-  # Log analysis and debugging tools
+  # A simple view into the openstreetmap-website Rails logs
 
 bin/kickApacheLog.sh
   # Rotates Apache logs
@@ -171,76 +163,37 @@ bin/osmdbtReplication.sh
 bin/createLinode.sh
   # Automates Linode server creation
 
-# Development and Testing
-bin/viewElevationTile.pl
-  # Visualize elevation tile data
-
-bin/editContourTiles.pl
-  # Interactive contour tile editor
-
+# Ad hoc
 bin/checkUser.pl
+  # On the API server, against parseAccessLog.pl's output
 bin/checkActiveStorageBlobs.pl
-  # User and storage validation
-
-bin/validateDbOverpassWays.pl
-bin/relationIds.pl
-  # Database validation utilities
-
-bin/scpFileIfNotUpdating.pl
-  # Conditional file transfer utility
-```
-
-### Compile TileUtil C Extension
-
-```bash
-# For performance-critical tile operations
-cd TileUtil
-perl Makefile.PL
-make
+  # Storage validation. Niche
 ```
 
 ## Architecture
 
 ### Module Organization
 
-- **OGF::Data::** OSM data model (Node, Way, Relation, Context, Changeset)
-  - `Context.pm`: Core data container, loads/saves OSM XML/OGF/PBF formats
-  - `Node.pm`, `Way.pm`, `Relation.pm`: OSM object representations
-  - `XML.pm`: SAX-based XML parser for OSM data
-  - `Consolidate.pm`: Data consolidation utilities
+Fourteen modules, all of them reached from scripts which run. The terrain half of
+this library - `OGF::Terrain`, `LayerInfo`, `View::TileLayer`, the tile
+utilities, and `Data::Consolidate` - was removed in August 2026 with the process
+it served, and is available at the tag `thilo-dem-process`.
 
-- **OGF::Terrain::** Elevation processing pipeline
-  - `ElevationTile.pm`: Core tile operations (makeArrayFromTile, makeTileFromArray, makeElevationFile)
-  - `ContourLines.pm`: Contour extraction from OSM data
-  - `ContourEditor.pm`: Interactive contour editing with Tk GUI
-  - `Transform.pm`: Coordinate transformations
-  - `PhysicalMap.pm`: Physical map generation
-  - `RiverProfile.pm`: River elevation profiles
+- **OGF::Data::** the OSM data model
+  - `Context.pm`: the data container, loads and saves OSM XML, OGF and PBF
+  - `Node.pm`, `Way.pm`, `Relation.pm`: OSM objects. `Relation` requires
+    `Geo::Topology` for way component assembly
+  - `Changeset.pm`, `XML.pm`: changesets, and the SAX parser
 
-- **OGF::Geo::** Geometric operations
-  - `Geometry.pm`: Point/line/polygon geometry
-  - `Topology.pm`: Topological analysis and boundary processing
-  - `Measure.pm`: Distance and area calculations
+- **OGF::Geo::**
+  - `Geometry.pm`: point, line and polygon geometry
+  - `Topology.pm`: way sequences and boundary assembly
 
-- **OGF::Util::** Utilities and helpers
-  - `TileLevel.pm`: Tile zoom level management
-  - `GlobalTile.pm`: Global tile coordinate systems
-  - `Canvas.pm`: Drawing operations
-  - `Shape.pm`: Geometric shape utilities
-  - `StreamShape.pm`: Stream/river shape processing
-  - `Overpass.pm`: Overpass API integration and query execution
-  - `File.pm`: File I/O utilities
-  - `Usage.pm`: Command-line usage helpers
-  - `Line.pm`, `ElevationLine.pm`: Line processing utilities
-  - `PPM.pm`: PPM image format handling
+- **OGF::Util::**
+  - `Overpass.pm`: Overpass queries, which most of the Perl here depends on
+  - `File.pm`, `Usage.pm`: file I/O and command line usage
 
-- **OGF::View::** Rendering and projection
-  - `Projection.pm`: Coordinate system projections
-  - `TileLayer.pm`: Tile layer management
-
-- **OGF::Const, OGF::LayerInfo**: Constants and layer configuration
-
-- **TileUtil/**: C extension module for performance-critical tile operations (surroundTile, convertTile, extractSubtile)
+- **OGF::View::Projection**, **OGF::Const**: projections and constants
 
 ### Systemd Services and Timers
 
@@ -264,6 +217,8 @@ Located in `etc/systemd/system/`:
 - `ogfutil-simplifiedAdminPolygons.timer` + `.service`: Admin boundary simplification
 - `ogfutil-adminPolygonsToMultimap.timer` + `.service`: Export admin boundaries
 - `ogfutil-userList.timer` + `.service`: User list exports
+- `dem-build.timer` + `.service`: elevation zones, weekly, rebuilding only
+  those whose contour squares have changed
 - `ogfutil-purgeWikiPagesSchedule[1-4].timer`: Wiki cleanup (multiple schedules)
 - `overpass-daily-activity.service` + `.timer`: Daily activity summaries
 
@@ -273,11 +228,11 @@ Located in `etc/systemd/system/`:
 
 ### Key Constants and Configuration
 
-- Standard tile size: 512x512 pixels (`$T_WIDTH`, `$T_HEIGHT`)
-- Bytes per pixel: 2 (shorts) or 4 (floats) (`$BPP`)
-- No elevation value sentinel: -30001 (`$NO_ELEV_VALUE`)
-- Tile coordinate systems follow OSM tiling scheme
-- Most operational scripts use hardcoded paths to `/opt/opengeofiction/`
+- Most scripts hardcode paths under `/opt/opengeofiction/`. The elevation ones
+  take `OGF`, `BASE`, `PUB` and `TOOLS` from the environment so they can be run
+  against a copy off the server
+- The tile constants which were here - `$T_WIDTH`, `$BPP`, `$NO_ELEV_VALUE` -
+  went with the terrain modules
 
 ### Tile Range Descriptors
 
@@ -289,17 +244,25 @@ Scripts accept tile ranges in two formats:
 2. Bounding box: `contour:OGF:13:bbox=121,-21.85,122,-21.8`
    - Format: `<type>:<layer>:<zoom>:bbox=<minLon>,<minLat>,<maxLon>,<maxLat>`
 
-### Elevation Processing Pipeline
+### Elevation Processing
 
-1. **Contour to Tiles** (`ogfElevation.pl`): Parse OSM contour files into raster contour tiles at specified zoom level
+Per zone, `buildDemZone.sh`, all of it GDAL:
 
-2. **Interpolation** (`makeElevationFromContour.pl`): Convert contour tiles to elevation data using radius-based and weighted interpolation algorithms (implemented in C via TileUtil)
+1. `demZoneExtent.py` decides which squares hold contours, and the grids - 1
+   arcsecond for the master, 3 for the archive and the compatibility zip. Both
+   grid registered, SRTM style, corner half a pixel outside the degree
+2. `ogr2ogr` collects every way with a numeric `ele` - contours and the water
+   edges at zero alike - through `etc/dem_osmconf.ini`, which exists because
+   GDAL's default ignores `ele`
+3. `gdal_rasterize`, then `gdal_fillnodata` bounded to 1.85 km
+4. `demLandClamp.py` separates land at sea level from the sea itself
+5. a box filter through a VRT kernel, for hillshading only
+6. `gdalwarp` to mercator, `gdaldem` for hillshade and relief
+7. `gdal_contour` and `demContoursToOsm.py` for the contour vectors
+8. `.hgt` slices, the compatibility zip, publish, then `demZoneStats.py`
 
-3. **Reprojection** (`makeSrtmElevationTile.pl`): Transform Mercator tiles to SRTM geographic projection (1x1 degree tiles)
-
-4. **3D Generation** (`make3dElevation.pl`): Create elevation data for Web Worldwind 3D display
-
-5. **Pyramid Building** (`convertMapLevel.pl`): Generate multi-resolution tile pyramids
+`dem/active-zones.txt` says which zones the renderers should load, which is a
+different question from which are published - see `elevation/inactive`.
 
 ### Operational Data Flow
 
@@ -330,34 +293,32 @@ Scripts accept tile ranges in two formats:
 
 ### Data Flow Between Modules
 
-- `Context` loads OSM/OGF/PBF → `ContourLines` extracts contours → `ElevationTile` creates raster tiles
-- `ElevationTile` uses `TileUtil` (C extension) for heavy computation
-- Stream data merged into contour layers via `StreamShape` utilities
-- Projection handled by `View::Projection` and `Geo::LibProj::FFI`
-- Operational scripts query via `OGF::Util::Overpass` wrapper
+- `OGF::Util::Overpass` is the common dependency: most Perl here is an Overpass
+  query, some processing, and a file written for the wiki or the website
+- `Context` loads OSM XML, OGF or PBF; `Relation` reaches `Geo::Topology` to
+  assemble way components, which is what territory and coastline work needs
+- Projection through `View::Projection` and `Geo::LibProj::FFI`
+- The elevation pipeline shares nothing with the Perl: GDAL, and Python where
+  GDAL needs driving
 
 ### File Formats
 
 - `.osm`: OSM XML format
 - `.ogf`: Custom OGF format (text-based, faster parsing)
 - `.pbf`: Protocol Buffer format (converted to OSM via osmosis)
-- `.cnr`: Contour tile files (binary)
-- `.bil`: Binary elevation tiles
-- `.hgt`: SRTM format height files
+- `.hgt`: SRTM format height files, 1201 samples square
+- `.tif`: the DEM, hillshade and relief rasters, tiled and DEFLATE
+- `.osm.xz`: the published contour squares, which JOSM opens directly
 - `.dmp`: PostgreSQL dump files (custom format)
 - `.osc`: OSM change files for replication
 
 ## Dependencies
 
-Key Perl modules required (from Makefile.PL):
-- Geo::LibProj::FFI (projections)
-- XML::SAX (XML parsing)
-- Archive::Zip
-- Math::Trig
-- Tk (for GUI editors)
-- LWP, URI::Escape, HTML::Entities (web operations)
-- Date::Format, Date::Parse, Time::HiRes
-- JSON::PP, JSON::XS (JSON handling in operational scripts)
+Perl: Geo::LibProj::FFI, XML::SAX, Math::Trig, LWP, URI::Escape,
+HTML::Entities, Date::Format, Date::Parse, Time::HiRes, JSON::XS, DBI for the
+log analysis. Tk is no longer needed, the GUI editors having gone.
+
+Python: `python3-gdal`, `python3-numpy`, `python3-pyosmium`, `python3-lxml`.
 
 External tools used by operational scripts:
 - `pg_dump`: PostgreSQL backup utility
@@ -366,6 +327,7 @@ External tools used by operational scripts:
 - `osmium`: OSM data manipulation tool
 - `overpass/`: Overpass API server binaries
 - `ncal`: Calendar calculations for backup scheduling
+- `gdal-bin`, `osmium`, `xz`, `zip`: the elevation process
 
 ## Environment Assumptions
 

@@ -15,13 +15,24 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-Environment=MIN_ZOOM=6
-Environment=MAX_ZOOM=12
 ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/fetchDemData.sh %i
-# renderd holds the vrt open, so it has to be restarted before the re-render, or
-# the new tiles are drawn from the old raster. The + runs this as root
-ExecStartPost=+/usr/bin/systemctl try-restart renderd
-ExecStartPost=/opt/opengeofiction/OGF-terrain-tools/bin/renderDemZones.sh %i
+# renderd holds the vrt open, so it has to be restarted before the expiry, or a
+# tile redrawn on demand comes from the old raster. The + runs this as root.
+#
+# Only when a zone actually changed. fetchDemData.sh removes changed-zones when
+# nothing did, and on a daily timer most days are that: restarting renderd
+# regardless drops the render queue and every render in flight each morning to
+# pick up a raster nobody replaced. renderDemZones.sh already guards itself the
+# same way
+ExecStartPost=+/bin/sh -c 'if [ -s /opt/opengeofiction/dem/changed-zones ]; then systemctl try-restart renderd; fi'
+# and the expiry runs as the user renderd writes tiles as, not as ogf. It marks
+# a tile dirty by setting its mtime back twenty years, and utime() with an
+# explicit time needs ownership - being in the group is not enough. As ogf it
+# printed "modifying timestamp failed: Operation not permitted" 784 times and
+# still exited 0, so the run looked clean and expired nothing. The + gives this
+# step privilege and runuser immediately drops it to _renderd, the same account
+# tile-expire@.service uses for the same reason
+ExecStartPost=+/usr/sbin/runuser -u _renderd -- /opt/opengeofiction/OGF-terrain-tools/bin/renderDemZones.sh %i
 # The re-render of a changed zone runs for as long as it takes
 TimeoutStartSec=infinity
 
