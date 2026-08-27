@@ -7,8 +7,18 @@ Description=Refreshes the DEM hillshade and contours, for %i
 RefuseManualStart=no
 
 [Timer]
-# run at 05:05 on the 5th of the month
-OnCalendar=*-*-05 05:05:00
+# daily, three hours after dem-build.timer publishes. Monthly on the 5th, which
+# this was, meant a zone rebuilt on the 6th waited until the 5th of the next
+# month to be drawn - up to thirty days for a change a mapper had already been
+# told was published.
+#
+# A run with nothing to fetch costs about 30 seconds and touches no tile: the
+# fetch removes changed-zones, renderDemZones.sh exits on that, and the renderd
+# restart is conditional on it in the service.
+OnCalendar=*-*-* 06:00
+# or a reboot at the wrong moment skips a day silently, which on the monthly
+# schedule this replaces meant skipping a month
+Persistent=true
 Unit=tile-refresh-dem@%i.service
 
 [Install]
