@@ -39,7 +39,16 @@ shift
 BASE=${BASE:-/opt/opengeofiction/dem}
 SRC=${SRC:-https://data.opengeofiction.net/dem}
 # Which hillshade this style wants. z2 is the softer one, which is what cyclogf
-# reads; the topo layer uses z5. Same DEM, two strengths
+# reads; ttopo uses z5. Same DEM, two strengths.
+#
+# It lives with the ramp, in the style's own dem directory, rather than in the
+# unit: a manual run then picks up the same value the timer does. Set in only
+# one of the two, the other silently re-fetches every zone at the other
+# strength, which looks like a slow day rather than a mistake
+ZFACTOR_FILE=${ZFACTOR_FILE:-/opt/opengeofiction/map-styles/${STYLE}/dem/zfactor}
+if [ -z "${ZFACTOR}" ] && [ -f ${ZFACTOR_FILE} ]; then
+	ZFACTOR=$(tr -d ' \t\n' < ${ZFACTOR_FILE})
+fi
 ZFACTOR=${ZFACTOR:-z2}
 # A VRT stops offering virtual overviews once one would fall below 256 pixels,
 # so the mosaic can use about eleven levels on its 587,114 pixel side. Going to
@@ -239,7 +248,12 @@ gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
 echo "=========== loading contours ==========="
 psql -lqt | cut -d\| -f1 | grep -qw ${DB} || createdb -E UTF8 ${DB}
 psql -d ${DB} -qc "CREATE EXTENSION IF NOT EXISTS postgis"
-psql -d ${DB} -qc "DROP VIEW IF EXISTS contours"
+# Both views go before the load and come back after it: osm2pgsql --create
+# replaces planet_osm_line underneath them. CASCADE is what lets an existing
+# server heal itself - ttopo's contour was originally created on top of
+# contours rather than beside it, and a plain DROP fails on the dependency
+psql -d ${DB} -qc "DROP VIEW IF EXISTS contour CASCADE"
+psql -d ${DB} -qc "DROP VIEW IF EXISTS contours CASCADE"
 
 MERGE_FILES=""
 mkdir -p ${BASE}/sorted
@@ -268,10 +282,18 @@ osm2pgsql --database ${DB} --create --style ${OSM2PGSQL_STYLE} \
 	${BASE}/contours-all.osm.pbf
 rm -f ${BASE}/contours-all.osm.pbf
 
-# The cyclosm style selects geometry and height from a contours relation, where
-# osm2pgsql has given us way and ele on planet_osm_line
+# osm2pgsql has given us way and ele on planet_osm_line. The two styles ask for
+# different names, so both views are created here whichever style ran: the
+# database is shared, and a style is not obliged to have loaded its own SQL
+# before this runs. Each is defined on planet_osm_line rather than one on the
+# other, so neither can take the other with it
+#
+# cyclogf selects geometry and height from a contours relation
 psql -d ${DB} -qc "CREATE VIEW contours AS \
 	SELECT way AS geometry, ele AS height FROM planet_osm_line WHERE ele IS NOT NULL"
+# ttopo selects geom and ele from a contour relation
+psql -d ${DB} -qc "CREATE VIEW contour AS \
+	SELECT way AS geom, ele FROM planet_osm_line WHERE ele IS NOT NULL"
 
 # Left for renderDemZones.sh, which runs after renderd has been restarted
 mv ${CHANGED_ZONES}.new ${CHANGED_ZONES}
