@@ -1,0 +1,29 @@
+#
+#  Systemd service file to trim the renderd tile cache
+#
+#  Not a template, unlike the other tile-* units. The cache filesystem is per
+#  host and shared by every style on it, so there is one instance of this, not
+#  one per style.
+#
+
+[Unit]
+Description=Trim the renderd tile cache when its filesystem is filling
+RequiresMountsFor=/var/cache/renderd
+
+[Service]
+Type=oneshot
+# The metatiles and the directories holding them belong to _renderd, the
+# account renderd writes as. Nothing here needs privilege beyond that
+User=_renderd
+Group=_renderd
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/cleanTileCache.sh
+# renderd is deliberately not restarted afterwards. A deleted metatile is drawn
+# again on the next request; a restart would drop the render queue for nothing
+#
+# A sweep walks the whole tree, which is hundreds of thousands of files on a
+# busy server, so it is given room. A run below the threshold does no walking
+# at all and returns in a fraction of a second
+TimeoutStartSec=2h
+
+[Install]
+WantedBy=default.target

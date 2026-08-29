@@ -1,0 +1,23 @@
+#
+#  Systemd timer file to trim the renderd tile cache
+#
+
+[Unit]
+Description=Trim the renderd tile cache daily
+RefuseManualStart=no
+
+[Timer]
+# 04:00, clear of everything else: dem-build publishes at 03:00, the DEM
+# refresh runs at 06:00, the render timers at 11:11/23:11 and 11:13/23:13, and
+# external data at 12 and 42 minutes past.
+#
+# A run under the threshold costs one df and exits, so a daily check is close
+# to free on the days it is not needed
+OnCalendar=*-*-* 04:00
+# A missed day is not serious, but the catch-up costs a df, so there is no
+# reason not to
+Persistent=true
+Unit=tile-cache-clean.service
+
+[Install]
+WantedBy=timers.target
