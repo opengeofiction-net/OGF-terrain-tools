@@ -122,12 +122,31 @@ def fetch_user_allowed_editors(username):
             if match:
                 # Get the HTML after the match
                 start = match.end()
-                following_html = html[start:start+2000]  # Get next 2000 chars
-                
-                # Extract text from <p> tags
-                p_tags = re.findall(r'<p>([^<]+)</p>', following_html)
+                following_html = html[start:start+3000]  # Get next 3000 chars
+
+                # Extract names from the paragraph containing the match,
+                # plus any complete <p>...</p> pairs after it. The permission
+                # list is usually INSIDE the same <p> as the header text
+                # (e.g. "Owner of X\nMappers with permission: a, b, c</p>"),
+                # so a bare re.findall on complete <p> pairs misses it —
+                # the opening tag is before the match point (fixed 2026-08-31,
+                # InfernoOGF's profile listed aviantiyanaki who was still
+                # being flagged for edits in their territory).
+                #
+                # Names may be wrapped in inline tags (<em>, <strong>, <a>),
+                # so strip tags from the candidate text before splitting.
+                # Take everything from the match point to the closing </p>
+                # (or next <p>), strip tags, and split on commas/newlines.
+                segment = following_html.split("</p>", 1)[0]
+                segment = re.sub(r"<[^>]+>", " ", segment)
+                segment = re.sub(r"\s+", " ", segment)
+                candidates = [c.strip() for c in re.split(r"[,;\n]", segment)]
+                # Also grab complete following <p> blocks (older profile style:
+                # header in one <p>, one name per subsequent <p>)
+                p_tags = re.findall(r"<p>([^<]+)</p>", following_html)
                 for text in p_tags:
-                    name = text.strip()
+                    candidates.extend(c.strip() for c in re.split(r"[,;\n]", text))
+                for name in candidates:
                     # Filter out empty lines and non-name text
                     if name and len(name) > 1 and len(name) < 50:
                         # Skip common non-name words that might appear
@@ -139,7 +158,7 @@ def fetch_user_allowed_editors(username):
                                 if not re.search(r'\.\s*[A-Z]', name):  # No sentence patterns
                                     allowed.add(name)
                 break
-        
+
         permission_cache[username] = allowed
         if allowed:
             print(f"  [PERMISSION] {username}: {len(allowed)} allowed editors: {', '.join(sorted(allowed))}")
@@ -1121,7 +1140,11 @@ def classify_user(user_info, report):
                     permitted_violations[status] += 1
                     continue  # Skip this violation - it's permitted
                 allowed_editors = fetch_user_allowed_editors(owner)
-                if username in allowed_editors:
+                # Case-insensitive match: profile permission lists may use a
+                # different casing than the current account name (e.g. owner
+                # lists "aviantiyanaki" but the account renamed to
+                # "Aviantiyanaki" — fixed 2026-08-31).
+                if username.lower() in {a.lower() for a in allowed_editors}:
                     has_permission = True
                     permitted_violations[status] += 1
                     continue  # Skip this violation - it's permitted
