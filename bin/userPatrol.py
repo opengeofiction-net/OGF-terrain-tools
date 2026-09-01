@@ -44,7 +44,7 @@ import re
 import math
 import hashlib
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 # ─── Configuration ───────────────────────────────────────────────────────────
@@ -800,15 +800,8 @@ def load_notified_users():
     Returns a set of username strings.
     """
     print("[4/5] Loading contacted users list...")
-    try:
-        req = urllib.request.Request(NOTIFIED_USERS_URL, headers={
-            "User-Agent": USER_AGENT,
-            "Referer": "https://opengeofiction.net/",
-        })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8")
-    except Exception as e:
-        print(f"  [ERROR] Could not load notified users: {e}")
+    raw = fetch_contacted_page()
+    if raw is None:
         return set()
 
     # Extract all {{OGF user|USERNAME}} patterns from the contacted users section
@@ -824,6 +817,152 @@ def load_notified_users():
 
     print(f"  Loaded {len(usernames)} notified users")
     return usernames
+
+
+def fetch_contacted_page():
+    """Fetch the patrol help page raw wikitext, or None on failure."""
+    try:
+        req = urllib.request.Request(NOTIFIED_USERS_URL, headers={
+            "User-Agent": USER_AGENT,
+            "Referer": "https://opengeofiction.net/",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as e:
+        print(f"  [ERROR] Could not fetch contacted users page: {e}")
+        return None
+
+
+def load_human_contacted_users(max_weeks=4):
+    """Find users contacted by HUMAN mappers (not Brothie) in the last N weeks.
+
+    The patrol help page's contacted-users list is maintained by both the
+    brothie bot AND human mappers who notice new users editing in the wrong
+    place. A human-added entry means a real mapper flagged the user — the bot
+    should review their edits too, even if they're no longer in the
+    new_users.json window (or never were). Brothie's own entries are skipped
+    (the bot already patrols and notifies those).
+
+    Each wiki line looks like:
+      * {{OGF user|NAME}} /[[User:ADDER|adder]] ... 12:34, 1 September 2026 (UTC)
+
+    Returns a list of user dicts matching load_new_users() shape:
+      {id, name, changesets_count, created, latest, block_status, is_mod, is_admin}
+    """
+    print("[4b] Loading human-contacted users (non-Brothie, "
+          f"last {max_weeks} weeks)...")
+    raw = fetch_contacted_page()
+    if raw is None:
+        return []
+
+    entries = []  # (name, adder, datetime)
+    for m in re.finditer(
+            r'\{\{OGF user\|([^}|]+)\}\}.*?\[\[User:([^|\]]+)\|'
+            r'[^\]]*\]\].*?(\d{1,2}:\d{2}, \d{1,2} \w+ \d{4}) \(UTC\)',
+            raw):
+        name = m.group(1).strip()
+        adder = m.group(2).strip()
+        ts = m.group(3).strip()
+        try:
+            dt = datetime.strptime(ts, "%H:%M, %d %B %Y")
+            dt = dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if adder.lower() == "brothie":
+            continue
+        if dt < datetime.now(timezone.utc) - timedelta(weeks=max_weeks):
+            continue
+        entries.append((name, adder, dt))
+
+    if not entries:
+        print("  No human-contacted users in window")
+        return []
+
+    print(f"  Found {len(entries)} human-contacted user(s): "
+          + ", ".join(f"{n} (by {a})" for n, a, _ in entries))
+
+    # Resolve names to user IDs via the changesets API (display_name lookup),
+    # and pull profile fields from the user endpoint.
+    users = []
+    seen_ids = set()
+    for name, adder, dt in entries:
+        try:
+            uid = resolve_user_id(name)
+            if uid is None or uid in seen_ids:
+                continue
+            seen_ids.add(uid)
+            info = fetch_user_info(uid)
+            users.append({
+                "id": uid,
+                "name": info.get("display_name", name),
+                "changesets_count": int(info.get("changesets", 0)),
+                "created": info.get("account_created", ""),
+                "latest": info.get("latest", ""),
+                "block_status": info.get("block_status", ""),
+                "is_mod": False,
+                "is_admin": False,
+                "contacted_by": adder,
+                "contacted_at": dt.isoformat(),
+            })
+        except Exception as e:
+            print(f"  [ERROR] Could not resolve {name}: {e}")
+    print(f"  Resolved {len(users)} human-contacted user(s) to IDs")
+    return users
+
+
+def resolve_user_id(username):
+    """Resolve a username to a user ID via the changesets API.
+
+    OGF has no name->ID endpoint, but /api/0.6/changesets?display_name=X
+    returns the user's changesets with uid="..." attributes.
+    """
+    path = f"/api/0.6/changesets?display_name={urllib.parse.quote(username)}&limit=1"
+    xml = oget(path)
+    if not xml:
+        return None
+    try:
+        root = ET.fromstring(xml)
+        cs = root.find(".//changeset")
+        if cs is not None:
+            return int(cs.get("uid", 0)) or None
+    except (ET.ParseError, ValueError):
+        pass
+    return None
+
+
+def fetch_user_info(user_id):
+    """Fetch /api/0.6/user/{id} and return the user element's attributes."""
+    path = f"/api/0.6/user/{user_id}"
+    xml = oget(path)
+    info = {}
+    if not xml:
+        return info
+    try:
+        root = ET.fromstring(xml)
+        user_el = root.find(".//user")
+        if user_el is None:
+            return info
+        info["id"] = int(user_el.get("id", 0))
+        info["display_name"] = user_el.get("display_name", "")
+        info["account_created"] = user_el.get("account_created", "")
+        cs = user_el.find(".//changesets")
+        if cs is not None:
+            info["changesets"] = cs.get("count", "0")
+        # latest changeset time from the changesets listing
+        cs_xml = oget(f"/api/0.6/changesets?user={user_id}&limit=1")
+        if cs_xml:
+            cs_root = ET.fromstring(cs_xml)
+            cs_el = cs_root.find(".//changeset")
+            if cs_el is not None:
+                info["latest"] = cs_el.get("created_at", "")
+        blocks = user_el.find(".//blocks")
+        if blocks is not None:
+            received = blocks.find("received")
+            count = int(received.get("count", 0)) if received is not None else 0
+            info["block_status"] = "B" if count > 0 else ""
+    except ET.ParseError:
+        pass
+    return info
 
 
 def notified_users_membership(username, user_id, notified_users):
@@ -998,7 +1137,7 @@ def check_node_against_territories(lon, lat, territories, permissible, statuses)
             violations.append((ogf_id, status_info["status"], status_info["owner"], terr_type))
     return violations
 
-def patrol_user(username, user_id, territories, permissible, statuses, territory_version, notified_users=None):
+def patrol_user(username, user_id, territories, permissible, statuses, territory_version, notified_users=None, contacted_by=None):
     """Run patrol for a single user. Returns a report dict."""
     if notified_users is None:
         notified_users = set()
@@ -1012,6 +1151,9 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
         "notified": notified_users_membership(username, user_id, notified_users),
         "notes": [],
     }
+    if contacted_by:
+        report["notes"].append(f"Flagged by human mapper {contacted_by} on the "
+                               "contacted-users wiki page (patrol review).")
 
     changesets = fetch_user_changesets(user_id)
     report["changesets_fetched"] = len(changesets)
@@ -1775,6 +1917,21 @@ def main():
     statuses = load_territory_statuses()
     permissible = get_permissible_territories(statuses)
     notified_users = load_notified_users()
+    human_contacted = load_human_contacted_users(max_weeks=4)
+    # Merge human-contacted users into the patrol list (dedup by ID).
+    # They were flagged by a real mapper, so their edits get reviewed even
+    # if they're outside the new_users.json window. The 4-week window keeps
+    # the added load small (typically 0-3 users per run).
+    existing_ids = {u["id"] for u in users}
+    added = 0
+    for hu in human_contacted:
+        if hu["id"] not in existing_ids:
+            users.append(hu)
+            existing_ids.add(hu["id"])
+            added += 1
+    if added:
+        print(f"  + {added} human-contacted user(s) merged into patrol list "
+              f"(total {len(users)})")
     permitted = check_bot_permission()
     statuses_global = statuses  # For use in classify_user
     territory_version = compute_territory_version(territories, statuses, permissible)
@@ -1799,7 +1956,7 @@ def main():
     
     for i, user in enumerate(users):
         print(f"\n[{i+1}/{len(users)}] Patrolling {user['name']} (ID: {user['id']})...", flush=True)
-        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, territory_version, notified_users)
+        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, territory_version, notified_users, user.get("contacted_by"))
         all_reports.append(report)
         classification = classify_user(user, report)
         all_classifications.append(classification)
