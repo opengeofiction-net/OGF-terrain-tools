@@ -819,6 +819,37 @@ def load_notified_users():
     return usernames
 
 
+def load_notified_timestamps():
+    """Parse the contacted users page and return {normalized_name: notified_datetime}.
+
+    The wiki entries include a per-entry timestamp (the ~~~~ signature),
+    which tells us WHEN each user was first contacted. This is used to
+    split violations into pre-notification vs post-notification — a user's
+    behaviour AFTER being told they're editing in the wrong place is the
+    actionable signal, not their pre-notification history.
+    """
+    raw = fetch_contacted_page()
+    if raw is None:
+        return {}
+    notified = {}
+    for m in re.finditer(
+            r'\{\{OGF user\|([^}|]+)\}\}.*?'
+            r'(\d{1,2}:\d{2}, \d{1,2} \w+ \d{4}) \(UTC\)',
+            raw):
+        name = m.group(1).strip()
+        ts = m.group(2).strip()
+        try:
+            dt = datetime.strptime(ts, "%H:%M, %d %B %Y")
+            dt = dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        key = _normalize_name(name)
+        # Keep the earliest notification time per user
+        if key not in notified or dt < notified[key]:
+            notified[key] = dt
+    return notified
+
+
 def fetch_contacted_page():
     """Fetch the patrol help page raw wikitext, or None on failure."""
     try:
@@ -1137,8 +1168,14 @@ def check_node_against_territories(lon, lat, territories, permissible, statuses)
             violations.append((ogf_id, status_info["status"], status_info["owner"], terr_type))
     return violations
 
-def patrol_user(username, user_id, territories, permissible, statuses, territory_version, notified_users=None, contacted_by=None):
-    """Run patrol for a single user. Returns a report dict."""
+def patrol_user(username, user_id, territories, permissible, statuses, territory_version, notified_users=None, contacted_by=None, notified_at=None):
+    """Run patrol for a single user. Returns a report dict.
+
+    notified_at: datetime the user was first contacted (from the wiki
+    contacted-users page). Violations are split into pre/post by
+    changeset creation time; post-notification violations are the
+    actionable signal (the user was told to stop and kept going).
+    """
     if notified_users is None:
         notified_users = set()
     report = {
@@ -1147,9 +1184,13 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
         "changesets_fetched": 0,
         "nodes_checked": 0,
         "violations": [],
+        "pre_notification_violations": 0,
+        "post_notification_violations": 0,
+        "notified_at": notified_at.isoformat() if notified_at else None,
         "territories_mapped": set(),
         "notified": notified_users_membership(username, user_id, notified_users),
         "notes": [],
+        "_changeset_times": {},
     }
     if contacted_by:
         report["notes"].append(f"Flagged by human mapper {contacted_by} on the "
@@ -1157,6 +1198,7 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
 
     changesets = fetch_user_changesets(user_id)
     report["changesets_fetched"] = len(changesets)
+    report["_changeset_times"] = {cs["id"]: cs["created_at"] for cs in changesets}
 
     if not changesets:
         report["notes"].append("No changesets found via API (user may be deleted/purged).")
@@ -1262,6 +1304,49 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
 
 # ─── User Classification ────────────────────────────────────────────────────
 
+def split_violations_by_notification(report):
+    """Split report['violations'] into pre/post notification counts.
+
+    Must run AFTER permission filtering (classify_user removes permitted
+    violations from report['violations']), so only genuine violations are
+    split. Uses per-changeset creation times recorded during patrol_user.
+    Sets pre_notification_violations / post_notification_violations and
+    appends a summary note.
+    """
+    notified_at = report.get("notified_at")
+    if not notified_at:
+        return
+    try:
+        notified_dt = datetime.fromisoformat(notified_at)
+    except ValueError:
+        return
+    cs_times = report.get("_changeset_times", {})
+    pre = post = 0
+    for v in report["violations"]:
+        t = cs_times.get(v.get("changeset_id"), "")
+        try:
+            dt = datetime.strptime(t[:19], "%Y-%m-%dT%H:%M:%S")
+            dt = dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            pre += 1  # unparseable -> assume pre-notification (conservative)
+            continue
+        if dt >= notified_dt:
+            post += 1
+        else:
+            pre += 1
+    report["pre_notification_violations"] = pre
+    report["post_notification_violations"] = post
+    if post == 0 and pre > 0:
+        report["notes"].append(
+            f"All {pre} violations predate notification "
+            f"({notified_dt.strftime('%Y-%m-%d')}) — no violations since "
+            "being contacted.")
+    elif post > 0:
+        report["notes"].append(
+            f"{post} violation(s) AFTER notification "
+            f"({notified_dt.strftime('%Y-%m-%d')}); {pre} before.")
+
+
 def classify_user(user_info, report):
     """
     Classify a user based on heuristics.
@@ -1354,26 +1439,45 @@ def classify_user(user_info, report):
         # even in the mixed case (e.g. 5028 permitted + 7 real = 7, not 5035).
         report["violations"] = actual_violations
         violations = len(actual_violations)
+
+        # Split into pre/post notification NOW, on the filtered list, so
+        # permitted edits (removed above) never count as post-notification
+        # violations.
+        split_violations_by_notification(report)
         
         # Report permitted edits (no penalty)
         for status, count in permitted_violations.items():
             reasons.append(f"Mapped {count} nodes in {status} territories with owner permission (no penalty)")
         
-        # Report actual violations
+        # Report actual violations. When the user was previously notified
+        # (notified_at present), pre-notification violations are history —
+        # often the very reason they were contacted — and count much less
+        # than violations committed AFTER being told to stop.
+        post_only = report.get("post_notification_violations")
+        pre_only = report.get("pre_notification_violations")
+        split = (post_only is not None and pre_only is not None
+                 and (post_only + pre_only) > 0)
         for status, count in violation_types.items():
             if status == "outside territory":
                 reasons.append(f"Mapped {count} nodes outside any territory")
-                score -= 2
+                score -= (1 if split else 2)
             elif status == "reserved" or status == "archived":
                 reasons.append(f"Mapped {count} nodes in {status} territories")
-                score -= 3
+                score -= (2 if split else 3)
             elif status == "owned" or status == "available" or status == "marked for withdrawal":
                 suffix = " (needs admin approval)" if status == "available" else ""
                 reasons.append(f"Mapped {count} nodes in {status} territories{suffix}")
-                score -= 2
+                score -= (1 if split else 2)
             else:
                 reasons.append(f"Mapped {count} nodes in '{status}' territory")
                 score -= 1
+
+        if split and post_only is not None and post_only > 0:
+            # The user kept violating AFTER being told to stop — this is the
+            # serious signal. Scale the penalty by post-violation volume.
+            score -= min(8, post_only // 100)
+            reasons.append(f"{post_only} violation(s) after notification — "
+                           "continued despite being contacted")
     
     if report["territories_mapped"] and len(report["territories_mapped"]) > 3:
         reasons.append(f"Mapped across {len(report['territories_mapped'])} different territories (unusual spread)")
@@ -1423,6 +1527,21 @@ def classify_user(user_info, report):
     else:
         classification = "good_faith"
         confidence = "high"
+
+    # Notified users who stopped: pre-notification violations are history.
+    # If they were contacted and have ZERO violations since, the behaviour
+    # concern is resolved — never classify them as suspicious/vandal on
+    # pre-notification history alone. (Stadtkartoffel10: 7362 violations,
+    # all before being contacted 2026-08-30; user confirmed compliance.)
+    post_only = report.get("post_notification_violations")
+    pre_only = report.get("pre_notification_violations")
+    if (post_only is not None and pre_only is not None
+            and post_only == 0 and pre_only > 0):
+        if classification in ("likely_vandal", "suspicious"):
+            classification = "needs_review"
+            confidence = "low"
+        reasons.append(f"Complied after notification: {pre_only} violations "
+                       "all predate contact, none since")
     
     # Admins/mods are always good faith
     if user_info["is_mod"] or user_info["is_admin"]:
@@ -1917,6 +2036,7 @@ def main():
     statuses = load_territory_statuses()
     permissible = get_permissible_territories(statuses)
     notified_users = load_notified_users()
+    notified_timestamps = load_notified_timestamps()
     human_contacted = load_human_contacted_users(max_weeks=4)
     # Merge human-contacted users into the patrol list (dedup by ID).
     # They were flagged by a real mapper, so their edits get reviewed even
@@ -1956,7 +2076,8 @@ def main():
     
     for i, user in enumerate(users):
         print(f"\n[{i+1}/{len(users)}] Patrolling {user['name']} (ID: {user['id']})...", flush=True)
-        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, territory_version, notified_users, user.get("contacted_by"))
+        notified_at = notified_timestamps.get(_normalize_name(user["name"]))
+        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, territory_version, notified_users, user.get("contacted_by"), notified_at)
         all_reports.append(report)
         classification = classify_user(user, report)
         all_classifications.append(classification)
