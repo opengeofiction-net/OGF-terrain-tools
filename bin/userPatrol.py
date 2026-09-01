@@ -782,6 +782,17 @@ def get_permissible_territories(statuses):
         if v["status"] in ("open to all", "collaborative")
     }
 
+def _normalize_name(name):
+    """Normalize a username for rename-robust comparison.
+
+    Case-insensitive and strips underscores/spaces, so renames like
+    '_aviantiyanaki_' -> 'Aviantiyanaki' still match (the wiki contacted
+    list keeps the name as-written at contact time; accounts may rename
+    later — observed 2026-09-01 with Aviantiyanaki).
+    """
+    return re.sub(r"[\s_]+", "", name).lower()
+
+
 def load_notified_users():
     """
     Parse the contacted users list from the patrol help page.
@@ -813,6 +824,50 @@ def load_notified_users():
 
     print(f"  Loaded {len(usernames)} notified users")
     return usernames
+
+
+def notified_users_membership(username, user_id, notified_users):
+    """Rename-robust notified check.
+
+    Returns True if the user was already contacted. Matches by:
+      1. normalized name (case/underscore-insensitive) against the wiki
+         contacted list — handles renames like _aviantiyanaki_ -> Aviantiyanaki
+      2. user ID against the persistent notified-uids cache — survives a
+         full rename (name no longer resembles the wiki entry)
+
+    The uid cache lives in var/notified_uids.json and is appended to
+    whenever a notification is actually sent, so a user stays 'notified'
+    across renames forever.
+    """
+    if notified_users is None:
+        notified_users = set()
+    if _normalize_name(username) in {_normalize_name(n) for n in notified_users}:
+        return True
+    # Persistent uid cache
+    try:
+        uid_cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "..", "var", "notified_uids.json")
+        with open(uid_cache_path) as f:
+            uid_cache = json.load(f)
+        return user_id in set(uid_cache.get("uids", []))
+    except (OSError, ValueError):
+        return False
+
+
+def record_notified_uid(user_id):
+    """Persist a user ID to the notified-uids cache (after a message is sent)."""
+    uid_cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "var", "notified_uids.json")
+    try:
+        with open(uid_cache_path) as f:
+            uid_cache = json.load(f)
+    except (OSError, ValueError):
+        uid_cache = {}
+    uids = set(uid_cache.get("uids", []))
+    uids.add(int(user_id))
+    uid_cache["uids"] = sorted(uids)
+    with open(uid_cache_path, "w") as f:
+        json.dump(uid_cache, f, indent=2)
 
 def check_bot_permission():
     """
@@ -954,7 +1009,7 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
         "nodes_checked": 0,
         "violations": [],
         "territories_mapped": set(),
-        "notified": username in notified_users,
+        "notified": notified_users_membership(username, user_id, notified_users),
         "notes": [],
     }
 
@@ -1793,11 +1848,11 @@ def main():
                     # Check if user should be notified:
                     # 1. Classification is needs_review or worse
                     # 2. Has violations
-                    # 3. Not already in notified_users list
+                    # 3. Not already notified (rename-robust: name or uid)
                     should_notify = (
                         cls["classification"] in ("needs_review", "suspicious", "likely_vandal") and
                         len(report["violations"]) > 0 and
-                        report["username"] not in notified_users
+                        not notified_users_membership(report["username"], report["user_id"], notified_users)
                     )
                     
                     if should_notify:
@@ -1817,6 +1872,7 @@ def main():
                         if success:
                             # Message was sent successfully - track it
                             successfully_notified.append(username_to_notify)
+                            record_notified_uid(report["user_id"])
                             
                             # Add to wiki contacted list (unless dry-run)
                             if not dry_run and wiki_opener:
