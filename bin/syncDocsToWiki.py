@@ -28,7 +28,10 @@ REFERER = "https://opengeofiction.net/"
 UA = "OGF-docs-internal-sync/1.0 (bot; Brothie)"
 BASE = os.path.expanduser("~/sync-ogf-docs-internal")
 REPO = os.path.join(BASE, "docs-internal")
-VAR = os.path.join(BASE, "var")
+# Shared daily book lives in the OGF-terrain-tools repo's var/ (next to this
+# script), the same daily-book-*.ndjson that userPatrol/templateFix/revertQueue
+# write and dailyReview.py reads.
+VAR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "var")
 ENV_FILE = os.path.expanduser("~/ogf-user.env")
 EDIT_PAUSE_S = 1.0
 
@@ -272,21 +275,24 @@ def main():
             created.append(title)
         time.sleep(EDIT_PAUSE_S)
 
-    # 7. book entry
-    entry = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "script": "docsSync",
-        "commit": head or "",
-        "dry_run": DRY_RUN,
-        "updated": updated,
-        "created": created,
-        "unchanged": len(unchanged),
-        "errors": errors,
-        "warnings": warns,
-    }
-    book = os.path.join(VAR, f"docs-sync-{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%d}.ndjson")
-    with open(book, "a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    # 7. daily book entry — shared with the other OGF bots, every real run
+    #    (even no-change runs), so the daily review always sees a docsSync row.
+    #    Dry-runs are manual and never written to the book.
+    if not DRY_RUN:
+        entry = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "script": "docsSync",
+            "commit": head or "",
+            "dry_run": DRY_RUN,
+            "updated": updated,
+            "created": created,
+            "unchanged": len(unchanged),
+            "errors": errors,
+            "warnings": warns,
+        }
+        book = os.path.join(VAR, f"daily-book-{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%d}.ndjson")
+        with open(book, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # 8. stdout report (delivered) — only when there is something to say
     if not DRY_RUN and not errors and not updated and not created and not warns:
