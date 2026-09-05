@@ -6,6 +6,6 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/parseSysStats.pl -dir /opt/opengeofiction/sys-stats -dest /var/www/html/data.opengeofiction.net/public_html/sys-stats/api.csv
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/parseSysStats.pl -dir /opt/opengeofiction/sys-stats -dest /var/www/html/data.opengeofiction.net/public_html/sys-stats/sys-stats.csv
 [Install]
 WantedBy=default.target

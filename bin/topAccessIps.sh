@@ -1,20 +1,12 @@
 #!/bin/bash
-# Summarise the top client IPs in the API access log.
-#
-# Replaces the grep/sort/uniq one-liners in the ogf user's crontab on the
-# Ubuntu 20.04 server. TODO: replace the patterns and output paths below with
-# the ones from that crontab (migration notes, step 1) - this is a placeholder
-# with the same shape.
+# Top 25 client IPs across yesterday's and today's access logs for the site
+# and for data.opengeofiction.net. Daily from ogfutil-topIps.timer, output to
+# the journal; was a cat|awk|sort one-liner in the ogf crontab, to cron mail.
 set -euo pipefail
 
-LOG=${LOG:-/var/www/html/opengeofiction.net/log/access.log}
-OUTPUT_DIR=${OUTPUT_DIR:-/opt/opengeofiction/ip-data}
-TOP=${TOP:-50}
+SITE=${SITE:-/var/www/html/opengeofiction.net/log}
+DATA=${DATA:-/var/www/html/data.opengeofiction.net/logs}
+TOP=${TOP:-25}
 
-mkdir -p "${OUTPUT_DIR}"
-day=$(date -u +%Y%m%d)
-
-# all requests
-awk '{print $1}' "${LOG}" | sort | uniq -c | sort -rn | head -n "${TOP}" > "${OUTPUT_DIR}/top-ips-${day}.txt"
-# element page views, the scraper target
-grep -E '"GET /(node|way|relation|changeset)/[0-9]+' "${LOG}" | awk '{print $1}' | sort | uniq -c | sort -rn | head -n "${TOP}" > "${OUTPUT_DIR}/top-ips-elements-${day}.txt"
+cat "${SITE}/access.log.1" "${SITE}/access.log" "${DATA}/access.log.1" "${DATA}/access.log" 2>/dev/null \
+  | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "${TOP}"

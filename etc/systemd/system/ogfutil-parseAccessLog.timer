@@ -2,8 +2,8 @@
 Description=Parse the API access log into changeset and IP data
 
 [Timer]
-# daily at 00:10 - TODO confirm against the old ogf crontab (migration notes, step 1)
-OnCalendar=*-*-* 00:10:00
+# hourly at :34, as the old ogf crontab
+OnCalendar=*:34
 Persistent=true
 Unit=ogfutil-parseAccessLog.service
 

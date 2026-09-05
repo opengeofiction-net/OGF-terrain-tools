@@ -1,0 +1,11 @@
+[Unit]
+Description=Re-date the pinned diary entry so it stays at the top
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/promote-diary-entry.sh
+[Install]
+WantedBy=default.target

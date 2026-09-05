@@ -1,24 +1,22 @@
 #!/bin/bash
-# Dump the recent changeset comments from the API database, for review.
-#
-# Replaces the psql one-liner in the ogf user's crontab on the Ubuntu 20.04
-# server. TODO: replace the query and output path below with the ones from
-# that crontab (migration notes, step 1) - this is a placeholder with the
-# same shape.
-#
-# Connection details come from the environment - the systemd unit reads
-# /etc/opengeofiction/db.env - or from the caller's PG* variables.
+# Dump four weeks of visible changeset comments as JSON, for OGF-Patrol and
+# the review tools, to data.opengeofiction.net. Hourly from
+# ogfutil-changesetComments.timer; was a psql one-liner in the ogf crontab.
 set -euo pipefail
 
 DB_NAME=${DB_NAME:-ogfdevapi}
-OUTPUT_DIR=${OUTPUT_DIR:-/opt/opengeofiction/ip-data}
-DAYS=${DAYS:-7}
+OUTPUT=${OUTPUT:-/var/www/html/data.opengeofiction.net/public_html/changeset-comments/recent.json}
 
-mkdir -p "${OUTPUT_DIR}"
-psql -X -A -F '|' -d "${DB_NAME}" -o "${OUTPUT_DIR}/changeset-comments.txt" <<EOF
-SELECT c.id, c.changeset_id, c.created_at, u.display_name, c.visible, c.body
-  FROM changeset_comments c
-  JOIN users u ON u.id = c.author_id
- WHERE c.created_at > now() - interval '${DAYS} days'
- ORDER BY c.created_at DESC;
-EOF
+mkdir -p "$(dirname "${OUTPUT}")"
+psql --dbname="${DB_NAME}" --output="${OUTPUT}.tmp" --tuples-only --command="
+SELECT ARRAY_TO_JSON(ARRAY_AGG(ROW_TO_JSON(r)))
+  FROM (SELECT cc.created_at,
+               CONCAT('https://opengeofiction.net/changeset/', cc.changeset_id, '#c', cc.id) AS url,
+               u.display_name AS user,
+               LEFT(cc.body, 60) AS comment
+          FROM changeset_comments cc, users u
+         WHERE cc.created_at > NOW() - INTERVAL '4 weeks'
+           AND cc.visible = true
+           AND cc.author_id = u.id
+         ORDER BY created_at DESC) r;"
+mv "${OUTPUT}.tmp" "${OUTPUT}"

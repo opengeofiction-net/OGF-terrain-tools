@@ -1,0 +1,11 @@
+[Unit]
+Description=Re-date the pinned diary entry so it stays at the top
+
+[Timer]
+# daily at 14:15, as the old ogf crontab
+OnCalendar=*-*-* 14:15:00
+Persistent=true
+Unit=ogfutil-promoteDiaryEntry.service
+
+[Install]
+WantedBy=timers.target
