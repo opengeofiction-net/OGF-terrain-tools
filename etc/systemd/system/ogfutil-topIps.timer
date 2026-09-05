@@ -1,0 +1,11 @@
+[Unit]
+Description=Top client IPs from the API access log
+
+[Timer]
+# daily at 00:50 - TODO confirm against the old ogf crontab
+OnCalendar=*-*-* 00:50:00
+Persistent=true
+Unit=ogfutil-topIps.service
+
+[Install]
+WantedBy=timers.target

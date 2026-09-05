@@ -1,0 +1,11 @@
+[Unit]
+Description=Top client IPs from the API access log
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/topAccessIps.sh
+[Install]
+WantedBy=default.target

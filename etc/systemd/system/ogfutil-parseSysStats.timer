@@ -1,0 +1,11 @@
+[Unit]
+Description=Convert yesterday's top snapshots to CSV
+
+[Timer]
+# daily at 00:30 - TODO confirm schedule and -dest against the old ogf crontab
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+Unit=ogfutil-parseSysStats.service
+
+[Install]
+WantedBy=timers.target

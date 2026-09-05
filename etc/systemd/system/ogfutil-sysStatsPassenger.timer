@@ -1,0 +1,11 @@
+[Unit]
+Description=Snapshot passenger-status to sys-stats
+
+[Timer]
+# every 5 minutes, as root: passenger-status needs it - TODO confirm against the old root crontab
+OnCalendar=*:0/5
+Persistent=true
+Unit=ogfutil-sysStatsPassenger.service
+
+[Install]
+WantedBy=timers.target

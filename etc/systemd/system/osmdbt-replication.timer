@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish minutely OSM change files from the API database (osmdbt)
+
+[Timer]
+# run every minute, on the minute. The script takes a lock, so a slow run
+# and the next tick cannot overlap
+OnCalendar=*:*:00
+AccuracySec=1s
+Unit=osmdbt-replication.service
+
+[Install]
+WantedBy=timers.target

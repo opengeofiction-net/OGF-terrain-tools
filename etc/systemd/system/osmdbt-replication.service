@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish minutely OSM change files from the API database (osmdbt)
+Wants=postgresql.service
+After=postgresql.service
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/osmdbtReplication.sh
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Dump recent changeset comments for review
+
+[Timer]
+# daily at 00:40 - TODO confirm against the old ogf crontab
+OnCalendar=*-*-* 00:40:00
+Persistent=true
+Unit=ogfutil-changesetComments.service
+
+[Install]
+WantedBy=timers.target

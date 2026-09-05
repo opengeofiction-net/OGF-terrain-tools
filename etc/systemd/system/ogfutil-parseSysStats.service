@@ -1,0 +1,11 @@
+[Unit]
+Description=Convert yesterday's top snapshots to CSV
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/parseSysStats.pl -dir /opt/opengeofiction/sys-stats -dest /var/www/html/data.opengeofiction.net/public_html/sys-stats/api.csv
+[Install]
+WantedBy=default.target

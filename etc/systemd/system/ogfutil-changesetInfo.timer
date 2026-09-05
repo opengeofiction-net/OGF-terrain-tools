@@ -1,0 +1,11 @@
+[Unit]
+Description=Changeset summaries for the automated reports
+
+[Timer]
+# daily at 00:20 - TODO confirm schedule and -od against the old ogf crontab
+OnCalendar=*-*-* 00:20:00
+Persistent=true
+Unit=ogfutil-changesetInfo.service
+
+[Install]
+WantedBy=timers.target

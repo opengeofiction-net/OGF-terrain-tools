@@ -1,0 +1,11 @@
+[Unit]
+Description=Snapshot top output to sys-stats
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/sysStats.sh
+[Install]
+WantedBy=default.target

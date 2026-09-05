@@ -1,0 +1,11 @@
+[Unit]
+Description=Snapshot passenger-status to sys-stats
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/sysStatsPassenger.sh
+[Install]
+WantedBy=default.target

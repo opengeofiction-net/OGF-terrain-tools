@@ -1,0 +1,12 @@
+[Unit]
+Description=Dump recent changeset comments for review
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+EnvironmentFile=/etc/opengeofiction/db.env
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/dumpChangesetComments.sh
+[Install]
+WantedBy=default.target

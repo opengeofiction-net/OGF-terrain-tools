@@ -1,0 +1,12 @@
+[Unit]
+Description=Parse the API access log into changeset and IP data
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+EnvironmentFile=/etc/opengeofiction/db.env
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/parseAccessLog.pl -host localhost -user ${DB_USER} -db ${DB_NAME} -password ${DB_PASSWORD}
+[Install]
+WantedBy=default.target
