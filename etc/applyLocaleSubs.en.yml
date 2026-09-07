@@ -16,3 +16,7 @@ en.site.about_section.community_driven_1_html: |
   Our contributors include enthusiast mappers, worldbuilders, cartographers,
   engineers running the OGF servers, and many more.
   To learn more about the community, see the %{osm_blog_link}.
+
+# The site strapline and the diaries label, as the 2021 tree had them.
+en.layouts.intro_text: OpenGeofiction is a user-made map of a fictional world, created using the OpenStreetMap software platform.
+en.layouts.header.user_diaries: Diaries

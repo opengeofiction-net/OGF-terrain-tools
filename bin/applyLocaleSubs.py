@@ -469,7 +469,9 @@ def main() -> None:
         print(f"note: no overrides file at {overrides_path}", file=sys.stderr)
 
     # Locale files — all *.yml in config/locales/
-    files_to_process = sorted(locales_path.glob("*.yml"))
+    # ogf.*.yml are OGF's own additions, committed on the fork's ogf branch and
+    # already worded for OGF - never rewrite those
+    files_to_process = sorted(f for f in locales_path.glob("*.yml") if not f.name.startswith("ogf."))
     if not files_to_process:
         print(f"error: no .yml files found in {locales_path}", file=sys.stderr)
         sys.exit(1)
