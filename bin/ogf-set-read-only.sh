@@ -9,7 +9,7 @@ CGIMAP_ENV=/opt/opengeofiction/openstreetmap-cgimap/etc/cgimap.env
 # Rails reads status from settings.local.yml - settings.yml is upstream's and
 # is never edited
 sed -i 's|^status: "online"|status: "api_readonly"|' ${RAILS}/config/settings.local.yml
-passenger-config restart-app ${RAILS} >/dev/null
+touch ${RAILS}/tmp/restart.txt
 
 # CGIMap does not read the Rails setting
 grep -q '^CGIMAP_DISABLE_API_WRITE=' ${CGIMAP_ENV} || echo 'CGIMAP_DISABLE_API_WRITE=true' >> ${CGIMAP_ENV}
