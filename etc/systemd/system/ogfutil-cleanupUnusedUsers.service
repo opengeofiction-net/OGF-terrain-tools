@@ -1,0 +1,14 @@
+[Unit]
+Description=Remove unused accounts from the API database
+Wants=postgresql.service
+After=postgresql.service
+RequiresMountsFor=/opt/opengeofiction
+
+[Service]
+Type=oneshot
+User=ogf
+Group=ogf
+EnvironmentFile=/etc/opengeofiction/db.env
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/cleanupUnusedUsers.sh
+[Install]
+WantedBy=default.target

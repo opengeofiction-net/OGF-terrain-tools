@@ -1,0 +1,11 @@
+[Unit]
+Description=Remove unused accounts from the API database
+
+[Timer]
+# monthly, the 1st at 04:20 UTC - after the nightly report jobs
+OnCalendar=*-*-01 04:20:00
+Persistent=true
+Unit=ogfutil-cleanupUnusedUsers.service
+
+[Install]
+WantedBy=timers.target
