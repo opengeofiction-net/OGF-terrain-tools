@@ -20,3 +20,12 @@ en.site.about_section.community_driven_1_html: |
 # The site strapline and the diaries label, as the 2021 tree had them.
 en.layouts.intro_text: OpenGeofiction is a user-made map of a fictional world, created using the OpenStreetMap software platform.
 en.layouts.header.user_diaries: Diaries
+
+# The export tab's "too large" sources - the view on the ogf branch shows only
+# planet and overpass; these are their OGF endpoints (upstream #7271 made the
+# URLs locale keys for exactly this).
+en.site.export.too_large.planet.url: https://data.opengeofiction.net/backups
+en.site.export.too_large.planet.title: "OpenGeofiction backup"
+en.site.export.too_large.planet.description: "Regularly-updated copies of the complete OpenGeofiction database"
+en.site.export.too_large.overpass.url: https://overpass.opengeofiction.net/api/map
+en.site.export.too_large.overpass.description: "Download this bounding box from a mirror of the OpenGeofiction database"
