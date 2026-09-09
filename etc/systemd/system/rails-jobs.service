@@ -1,5 +1,5 @@
 [Unit]
-Description=Rails job queue runner (%i) for the OpenGeofiction site
+Description=Rails job queue runner for the OpenGeofiction site
 Wants=postgresql.service memcached.service
 After=network.target postgresql.service memcached.service
 
@@ -10,7 +10,9 @@ Group=ogf
 WorkingDirectory=/var/www/html/opengeofiction.net
 # RAILS_ENV and SECRET_KEY_BASE, shared with the Apache/Passenger vhost
 EnvironmentFile=/etc/opengeofiction/rails.env
-Environment=QUEUE=%i
+# No QUEUE: one worker takes every queue - default, mailers (all site mail),
+# notifiers. OSMF runs one worker per queue; on an 8 GB box one is enough,
+# and a worker on 'default' alone leaves the mail queued forever
 Environment=SLEEP_DELAY=60
 ExecStart=/usr/bin/bundle exec rails jobs:work
 Restart=on-failure
