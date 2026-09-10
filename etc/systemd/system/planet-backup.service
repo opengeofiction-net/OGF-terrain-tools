@@ -1,10 +1,16 @@
 [Unit]
 Description=Backup ogfdevapi database to .osm.pbf file
+Wants=postgresql.service
+After=postgresql.service
+RequiresMountsFor=/opt/opengeofiction
 
 [Service]
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/backupPlanet.sh /opt/opengeofiction/backup ogfdevapi /var/www/html/data.opengeofiction.net/public_html/backups
+# PLANET_BACKUP_MODE=local|spinup and, for spinup, LINODE_CLI_TOKEN. Absent
+# file means a local backup
+EnvironmentFile=-/etc/opengeofiction/planet-backup.env
+ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/planetBackupRun.sh /opt/opengeofiction/backup ogfdevapi /var/www/html/data.opengeofiction.net/public_html/backups
 
 [Install]
 WantedBy=default.target
