@@ -6,6 +6,7 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=root
 Group=root
+Environment=PASSENGER_INSTANCE_REGISTRY_DIR=/run/passenger-instreg
 ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/sysStatsPassenger.sh
 [Install]
 WantedBy=default.target
