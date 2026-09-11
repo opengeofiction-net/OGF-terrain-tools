@@ -43,6 +43,7 @@ import time
 import re
 import math
 import hashlib
+import signal
 import subprocess
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
@@ -74,6 +75,68 @@ CREDENTIALS_PATH = os.path.expanduser("~/ogf-user.env")
 # deviation introduced by the Visvalingam-Whyatt simplification
 # (zoom 6, threshold 100) used in simplifiedAdminPolygons.pl.
 TERRITORY_BUFFER_DEG = 0.01
+
+# ─── SCP upload of the JSON reports ──────────────────────────────────────────
+#
+# Two hazards are handled here:
+#   * an unreachable or stalled host: without ConnectTimeout the connect can sit
+#     for the OS default (minutes), and without ServerAliveInterval a transfer
+#     that stalls mid-way is never noticed;
+#   * an interactive prompt (password / passphrase / host key) blocks forever in
+#     a cron context with no tty — BatchMode=yes makes it fail instead.
+SCP_OPTIONS = [
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=15",
+    "-o", "ConnectionAttempts=1",
+    "-o", "ServerAliveInterval=10",
+    "-o", "ServerAliveCountMax=3",
+]
+SCP_TIMEOUT = 60  # seconds, per file
+
+
+def run_scp(path, target, timeout=SCP_TIMEOUT):
+    """Upload one file with scp under a hard, effective timeout.
+
+    `subprocess.run(..., timeout=...)` is NOT sufficient: on expiry it kills
+    scp, but the ssh child scp spawned can keep the captured stdout/stderr pipes
+    open, so the follow-up communicate() blocks forever and the whole patrol
+    hangs. Observed 2026-09-11 04:54 — userPatrol ran until the cron wrapper's
+    600s timeout killed it, which surfaced as a silent, unexplained failure.
+
+    Run scp in its own session and kill the whole process group on expiry, so
+    the timeout actually takes effect.
+
+    Returns (status, detail) with status "ok", "timeout" or "failed".
+    """
+    cmd = ["scp", *SCP_OPTIONS, path, target]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        return "failed", "scp command not found"
+
+    try:
+        out, err = proc.communicate(timeout=timeout)
+        if proc.returncode == 0:
+            return "ok", ""
+        lines = (err or out or "").strip().splitlines()
+        return "failed", lines[-1] if lines else f"exit code {proc.returncode}"
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        try:
+            proc.communicate(timeout=5)
+        except Exception:
+            pass
+        return "timeout", f"no response within {timeout}s"
+
 
 # ─── User Permission Cache ───────────────────────────────────────────────────
 
@@ -2197,28 +2260,17 @@ def main():
         # SCP to remote target if specified
         if scp_target:
             print(f"\n  SCP TO: {scp_target}")
-            try:
-                # SCP detailed report
-                cmd = ["scp", detailed_path, scp_target]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if result.returncode == 0:
-                    print(f"  ✓ Uploaded: new_users_patrol.json")
+            for path, label in (
+                (detailed_path, "new_users_patrol.json"),
+                (summary_path, "new_users_patrol_summary.json"),
+            ):
+                status, detail = run_scp(path, scp_target)
+                if status == "ok":
+                    print(f"  ✓ Uploaded: {label}")
+                elif status == "timeout":
+                    print(f"  ✗ Failed: {label} - scp {detail}")
                 else:
-                    print(f"  ✗ Failed: new_users_patrol.json - {result.stderr.strip()}")
-                
-                # SCP summary report
-                cmd = ["scp", summary_path, scp_target]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if result.returncode == 0:
-                    print(f"  ✓ Uploaded: new_users_patrol_summary.json")
-                else:
-                    print(f"  ✗ Failed: new_users_patrol_summary.json - {result.stderr.strip()}")
-            except subprocess.TimeoutExpired:
-                print(f"  ✗ SCP timed out after 60 seconds")
-            except FileNotFoundError:
-                print(f"  ✗ scp command not found")
-            except Exception as e:
-                print(f"  ✗ SCP error: {e}")
+                    print(f"  ✗ Failed: {label} - {detail}")
 
 if __name__ == "__main__":
     main()
