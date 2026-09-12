@@ -168,6 +168,11 @@ bin/checkUser.pl
   # On the API server, against parseAccessLog.pl's output
 bin/checkActiveStorageBlobs.pl
   # Storage validation. Niche
+bin/syncDocsToWiki.py
+  # Pulls the docs-internal repo (Admin: docs, .md canonical), rebuilds the
+  # .wiki output with make, and syncs changed pages to the Admin: namespace
+  # on the wiki (wikipage: front matter maps .md -> wiki page title). Runs
+  # daily via cron; logs a docsSync entry to var/daily-book every run.
 ```
 
 ## Architecture

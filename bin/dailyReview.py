@@ -379,6 +379,26 @@ def format_summary(date_str, by_script):
         lines.append("=== revertQueue ===")
         lines.append("* No runs recorded")
 
+    # docsSync
+    ds_entries = by_script.get("docsSync", [])
+    if ds_entries:
+        total_runs = len(ds_entries)
+        total_updated = sum(len(e.get("updated", [])) for e in ds_entries)
+        total_created = sum(len(e.get("created", [])) for e in ds_entries)
+        changed_pages = sorted({t for e in ds_entries for t in e.get("updated", []) + e.get("created", [])})
+        err_runs = sum(1 for e in ds_entries if e.get("errors"))
+        lines.append("")
+        lines.append("=== docsSync ===")
+        lines.append(f"* {total_runs} runs, {total_updated} pages updated, {total_created} created")
+        for t in changed_pages:
+            lines.append(f"** {t}")
+        if err_runs:
+            lines.append(f"* {err_runs} run(s) with errors")
+    else:
+        lines.append("")
+        lines.append("=== docsSync ===")
+        lines.append("* No runs recorded")
+
     return "\n".join(lines)
 
 
