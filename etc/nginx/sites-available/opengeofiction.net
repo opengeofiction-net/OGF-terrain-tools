@@ -42,22 +42,3 @@ server {
         include snippets/ogf-proxy.conf;
     }
 }
-
-# www is not served: 404 with a notice, never a redirect - a 301 taught a
-# crawler to follow it and doubled every request (2026-09-14) - and the
-# connection is closed at once. The site has one name
-server {
-    listen 80;
-    listen [::]:80;
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    server_name www.opengeofiction.net;
-    include snippets/ogf-tls.conf;
-    include snippets/ogf-acme.conf;
-    access_log /var/log/nginx/www.opengeofiction.net.access.log combined_ms;
-    keepalive_timeout 0;
-    default_type text/plain;
-    location / {
-        return 404 "This host is not served - please use https://opengeofiction.net/ instead of www.opengeofiction.net.\n";
-    }
-}
