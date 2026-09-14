@@ -1,0 +1,23 @@
+# level0.opengeofiction.net - PHP under Apache, proxied like the site
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name level0.opengeofiction.net;
+    access_log off;
+    include snippets/ogf-acme.conf;
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name level0.opengeofiction.net;
+    include snippets/ogf-tls.conf;
+    access_log off;
+    location / {
+        include snippets/ogf-proxy.conf;
+    }
+}

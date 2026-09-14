@@ -1,0 +1,63 @@
+# opengeofiction.net - the site and the API, proxied to Apache. Apache writes
+# the site's access log (combined_ms, real client address via mod_remoteip),
+# so the proxied blocks do not log: a second copy doubles the volume.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name opengeofiction.net;
+    access_log off;
+    include snippets/ogf-acme.conf;
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name opengeofiction.net;
+    include snippets/ogf-tls.conf;
+    access_log off;
+
+    location = /server-status {
+        allow 127.0.0.1;
+        allow ::1;
+        allow 10.33.7.0/24;
+        deny all;
+        include snippets/ogf-proxy.conf;
+    }
+    location / {
+        include snippets/ogf-proxy.conf;
+    }
+}
+
+# api.ogf is the VPN name, plain HTTP, served as the site
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.ogf;
+    access_log off;
+    location / {
+        include snippets/ogf-proxy.conf;
+    }
+}
+
+# www is not served: 404 with a notice, never a redirect - a 301 taught a
+# crawler to follow it and doubled every request (2026-09-14) - and the
+# connection is closed at once. The site has one name
+server {
+    listen 80;
+    listen [::]:80;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name www.opengeofiction.net;
+    include snippets/ogf-tls.conf;
+    include snippets/ogf-acme.conf;
+    access_log /var/log/nginx/www.opengeofiction.net.access.log combined_ms;
+    keepalive_timeout 0;
+    default_type text/plain;
+    location / {
+        return 404 "This host is not served - please use https://opengeofiction.net/ instead of www.opengeofiction.net.\n";
+    }
+}

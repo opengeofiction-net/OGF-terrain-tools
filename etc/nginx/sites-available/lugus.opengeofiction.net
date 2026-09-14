@@ -1,0 +1,46 @@
+# Test system only. lugus sits behind the hub's nginx, which terminates TLS
+# and forwards plain HTTP with X-Forwarded-For; this nginx sits in front of
+# Apache exactly as production's does, so the Apache side is the tested one.
+# Replaces the three production sites: the hub owns the certificate, and
+# Apache must be told the client's address and that the request was HTTPS
+# (config.force_ssl), which is why ogf-proxy.conf is spelt out here.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name lugus.opengeofiction.net api.ogf;
+    access_log off;
+    set_real_ip_from 192.168.0.0/24;      # the hub's subnet
+    real_ip_header X-Forwarded-For;
+
+    location = /server-status {
+        allow 127.0.0.1;
+        allow ::1;
+        allow 10.33.7.0/24;
+        deny all;
+        proxy_pass http://ogf-apache;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    location / {
+        proxy_pass http://ogf-apache;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 60s;
+        proxy_buffering off;
+    }
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name data.ogf;
+    include snippets/ogf-data.conf;
+}

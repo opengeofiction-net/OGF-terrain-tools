@@ -1,0 +1,28 @@
+# data.opengeofiction.net - static, served by nginx itself (snippets/ogf-data.conf)
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name data.opengeofiction.net;
+    access_log off;
+    include snippets/ogf-acme.conf;
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name data.opengeofiction.net;
+    include snippets/ogf-tls.conf;
+    include snippets/ogf-data.conf;
+}
+
+# data.ogf is the VPN name, plain HTTP, same tree
+server {
+    listen 80;
+    listen [::]:80;
+    server_name data.ogf;
+    include snippets/ogf-data.conf;
+}
