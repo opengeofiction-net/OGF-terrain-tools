@@ -83,6 +83,12 @@ THRESHOLDS = [50, 10, 200]
 # is simplification debris or a way that never closed into a ring.
 MIN_RING_PX_AREA = 0.25
 
+# Floor for the iterative re-simplification of a preserved ring: threshold/2,
+# threshold/4 and so on down to this, after which the ring is emitted
+# unsimplified. Halving once is not always enough - a ring only a few pixels
+# across collapses to a line at threshold/2 as well, and would be lost.
+MIN_RING_PX_THRESHOLD = 1.0
+
 # Web Mercator constants
 WGS84_SEMI_MAJOR = 6378137.0
 WGS84_ECCEN_SQ = 0.00669437999014
@@ -501,6 +507,47 @@ def simplify_ring_points(node_ids, nodes, to_pixel, threshold):
         out.append([lat, lon])
     return out
 
+
+def is_real_ring(points, to_pixel):
+    """True if the points are a polygon rather than a line or a sub-pixel stub.
+
+    Two nodes mean a way that never closed into a ring; a bounding box under
+    MIN_RING_PX_AREA is simplification debris. Both used to be dropped and still are.
+    """
+    if not points or len(points) < 3:
+        return False
+    xs = []
+    ys = []
+    for lat, lon in points:
+        px, py = to_pixel(lon, lat)
+        xs.append(px)
+        ys.append(py)
+    return (max(xs) - min(xs)) * (max(ys) - min(ys)) >= MIN_RING_PX_AREA
+
+
+def preserve_ring(node_ids, nodes, to_pixel, threshold):
+    """Re-emit a ring that would otherwise be dropped below the threshold.
+
+    Iteratively re-simplifies at threshold/2, threshold/4, ... until the ring
+    survives as a real polygon, and finally falls back to the unsimplified ring -
+    a ring smaller than the smallest triangle the simplifier keeps has no coarser
+    form that still closes. Returns [lat, lon] points, or None if the ring is not
+    a polygon at any resolution (a way that never closed, or debris).
+    """
+    t = threshold / 2.0
+    while t >= MIN_RING_PX_THRESHOLD:
+        points = simplify_ring_points(node_ids, nodes, to_pixel, t)
+        if is_real_ring(points, to_pixel):
+            return points
+        t /= 2.0
+
+    points = simplify_ring_points(node_ids, nodes, to_pixel, 0.0)
+    if is_real_ring(points, to_pixel):
+        logging.debug("ring preserved at full resolution (%d node(s))", len(node_ids))
+        return points
+    return None
+
+
 def bounding_rectangle(way_nodes, nodes, to_pixel):
     """Compute bounding rectangle of a way in pixel coordinates."""
     if not way_nodes:
@@ -802,29 +849,20 @@ def run(args):
             # A ring below the threshold is normally dropped as map clutter, but
             # it can be real territory - an exclave, such as Plevia's Isole
             # Libeccie, or an enclave belonging to a neighbour - so instead of
-            # dropping it, re-simplify it at half the threshold and keep it. The
-            # rebuild is lazy: only rings that would actually be dropped pay for
-            # it, which is a handful across the whole dataset.
+            # dropping it, preserve_ring() re-simplifies it at threshold/2,
+            # threshold/4, ... and finally unsimplified, until it is a polygon
+            # again. The rebuild is lazy: only rings that would actually be
+            # dropped pay for it, which is a handful across the whole dataset.
             for i in range(1, len(poly_rings)):
                 if poly_rings[i]['rect_area'] < threshold:
-                    fine = None
                     ring_ways = [w for w in poly_rings[i]['ways'] if w in rel_way_info_fine]
                     seqs = build_way_sequence({w: rel_way_info_fine[w] for w in ring_ways})
                     if len(seqs) == 1:
-                        cand = simplify_ring_points(seqs[0]['nodes'], nodes,
-                                                    to_pixel, threshold / 2.0)
-                        # Only keep real polygons: a two-node sequence is a way
-                        # that never closed into a ring, and a sub-pixel bbox is
-                        # debris - both were dropped before and still are.
-                        if cand and len(cand) >= 3:
-                            xs = []
-                            ys = []
-                            for lat, lon in cand:
-                                px, py = to_pixel(lon, lat)
-                                xs.append(px)
-                                ys.append(py)
-                            if (max(xs) - min(xs)) * (max(ys) - min(ys)) >= MIN_RING_PX_AREA:
-                                fine = cand
+                        fine = preserve_ring(seqs[0]['nodes'], nodes, to_pixel, threshold)
+                    else:
+                        fine = None
+                        logging.debug("rel %s: dropped ring assembled %d sequence(s) "
+                                      "instead of 1 - not preserved", rid, len(seqs))
                     if fine:
                         poly_rings[i] = {
                             'rect_area': poly_rings[i]['rect_area'],
@@ -832,6 +870,9 @@ def run(args):
                         }
                         preserved_small_rings += 1
                     else:
+                        logging.debug("rel %s: dropped ring (%d way(s), coarse area %.4f) is "
+                                      "not a polygon at any resolution - dropped",
+                                      rid, len(ring_ways), poly_rings[i]['rect_area'])
                         poly_rings[i] = None
 
             result = [r['points'] for r in poly_rings if r is not None]
