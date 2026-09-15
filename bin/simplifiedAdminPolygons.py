@@ -75,8 +75,8 @@ OUTFILE_NAMES = {"default": "ogf_polygons", "test": "test_polygons"}
 # Example: VERIFY_IGNORE = {459229: "TA250"}
 VERIFY_IGNORE = {}
 
-# Simplification thresholds to compute
-THRESHOLDS = [50]
+# Simplification thresholds to compute: the first is primary, saved as territory.json and errors output
+THRESHOLDS = [50, 10, 200]
 
 # Web Mercator constants
 WGS84_SEMI_MAJOR = 6378137.0
@@ -802,14 +802,15 @@ def run(args):
                 sys.stderr.write("\n")
 
         # Write errors JSON (only for the primary threshold, traditionally 50)
-        err_file = f"{output_dir}/{outfile_name}_errors.json"
-        with open(err_file, 'w', encoding='utf-8') as f:
-            json.dump(errors, f, indent=2)
-            f.write("\n")
+        if threshold == THRESHOLDS[0]:
+            err_file = f"{output_dir}/{outfile_name}_errors.json"
+            with open(err_file, 'w', encoding='utf-8') as f:
+                json.dump(errors, f, indent=2)
+                f.write("\n")
 
-        if copy_to and os.path.isdir(copy_to):
-            pub_file = f"{copy_to}/territory_errors.json"
-            shutil.copy2(err_file, pub_file)
+            if copy_to and os.path.isdir(copy_to):
+                pub_file = f"{copy_to}/territory_errors.json"
+                shutil.copy2(err_file, pub_file)
 
         if errors:
             # Print errors to stderr for debugging
@@ -823,8 +824,11 @@ def run(args):
         write_polygon_json(poly_file, polygons)
 
         if copy_to and os.path.isdir(copy_to):
-            pub_file = f"{copy_to}/territory.json"
+            pub_file = f"{copy_to}/territory_{threshold}.json"
             shutil.copy2(poly_file, pub_file)
+            if threshold == THRESHOLDS[0]:
+                pub_file = f"{copy_to}/territory.json"
+                shutil.copy2(poly_file, pub_file)
 
         logging.info("Threshold %d: wrote %d polygons to %s", threshold, len(polygons), poly_file)
 
