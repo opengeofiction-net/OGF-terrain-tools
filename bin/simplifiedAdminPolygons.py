@@ -76,7 +76,7 @@ OUTFILE_NAMES = {"default": "ogf_polygons", "test": "test_polygons"}
 VERIFY_IGNORE = {}
 
 # Simplification thresholds to compute: the first is primary, saved as territory.json and errors output
-THRESHOLDS = [50, 10, 200]
+THRESHOLDS = [50, 1, 10, 200]
 
 # Smallest ring, in square pixels at the computation zoom, worth emitting when a
 # ring is preserved below the threshold (see the polygon assembly). Below this it
