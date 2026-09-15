@@ -76,6 +76,16 @@ CREDENTIALS_PATH = os.path.expanduser("~/ogf-user.env")
 # (zoom 6, threshold 100) used in simplifiedAdminPolygons.pl.
 TERRITORY_BUFFER_DEG = 0.01
 
+# Wall-clock budget for a whole run, in seconds. A cold cache (new territory
+# version) needs a full re-raycast of every user, which is far longer than the
+# cron slot, so the run patrols as many users as fit in the budget and defers
+# the rest to the next run - see the ordering in main(). Override with
+# --time-budget SECONDS.
+DEFAULT_TIME_BUDGET = 420
+# Seconds held back from the budget for everything after the patrol loop:
+# logins, notification messages, wiki edits, JSON write and scp.
+TAIL_RESERVE_SECONDS = 75
+
 # ─── SCP upload of the JSON reports ──────────────────────────────────────────
 #
 # Two hazards are handled here:
@@ -747,17 +757,44 @@ def point_near_polygon(lon, lat, polygon, threshold_deg):
             return True
     return False
 
+def ring_inside_ring(inner, outer):
+    """True if the ring `inner` lies inside the ring `outer` (vertex sampling)."""
+    n = len(inner)
+    if n < 3:
+        return False
+    step = max(1, n // 8)
+    samples = inner[::step]
+    inside = sum(1 for (x, y) in samples if point_in_polygon(x, y, outer))
+    return inside * 2 > len(samples)
+
 def parse_territory_polygon(coords):
-    """Parse territory.json polygon into (outer_ring, holes)."""
+    """Parse a territory polygon from territory.json.
+
+    The published format is a multipolygon: a list of rings, the largest first.
+    A ring that lies *inside* the first ring is a hole; every other ring is a
+    separate part of the same territory (an exclave, e.g. Plevia's Isole
+    Libeccie). Returns (outer_ring, holes, parts) with (lon, lat) coordinates.
+
+    NOTE: treating every ring beyond the first as a hole (the original
+    behaviour) excludes exclaves from their own territory — a node mapped
+    inside an exclave was reported as "outside any territory". Of the 232
+    extra rings in the current territory.json only 4 are genuinely nested;
+    the other 228 are disjoint parts.
+    """
     if not coords or len(coords) < 2:
-        return [], []
+        return [], [], []
     if isinstance(coords[0], list) and len(coords[0]) > 0 and isinstance(coords[0][0], list):
-        outer = [(c[1], c[0]) for c in coords[0]]
-        holes = [[(c[1], c[0]) for c in ring] for ring in coords[1:]]
-        return outer, holes
+        rings = [[(c[1], c[0]) for c in ring] for ring in coords]
     else:
-        outer = [(c[1], c[0]) for c in coords]
-        return outer, []
+        rings = [[(c[1], c[0]) for c in coords]]
+    outer = rings[0]
+    holes, parts = [], []
+    for ring in rings[1:]:
+        if ring_inside_ring(ring, outer):
+            holes.append(ring)
+        else:
+            parts.append(ring)
+    return outer, holes, parts
 
 # ─── Data Loading ────────────────────────────────────────────────────────────
 
@@ -792,10 +829,11 @@ def load_territories():
         sys.exit(1)
     territories = {}
     for ogf_id, coords in data.items():
-        outer, holes = parse_territory_polygon(coords)
+        outer, holes, parts = parse_territory_polygon(coords)
         territories[ogf_id] = {
             "outer_ring": outer,
             "holes": holes,
+            "parts": parts,
         }
     print(f"  Loaded {len(territories)} territory polygons")
     return territories
@@ -1226,12 +1264,14 @@ def check_node_against_territories(lon, lat, territories, permissible, statuses)
             continue
         if status_info["status"] == "unknown":
             continue
-        if point_in_polygon_with_holes(lon, lat, terr["outer_ring"], terr["holes"]):
+        if point_in_polygon_with_holes(lon, lat, terr["outer_ring"], terr["holes"]) or \
+           any(point_in_polygon(lon, lat, part) for part in terr.get("parts") or ()):
             terr_type = "permissible" if ogf_id in permissible else "restricted"
             violations.append((ogf_id, status_info["status"], status_info["owner"], terr_type))
     return violations
 
-def patrol_user(username, user_id, territories, permissible, statuses, territory_version, notified_users=None, contacted_by=None, notified_at=None):
+def patrol_user(username, user_id, territories, permissible, statuses, territory_version,
+                notified_users=None, contacted_by=None, notified_at=None, deadline=None):
     """Run patrol for a single user. Returns a report dict.
 
     notified_at: datetime the user was first contacted (from the wiki
@@ -1254,6 +1294,8 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
         "notified": notified_users_membership(username, user_id, notified_users),
         "notes": [],
         "_changeset_times": {},
+        "partial": False,
+        "changesets_remaining": 0,
     }
     if contacted_by:
         report["notes"].append(f"Flagged by human mapper {contacted_by} on the "
@@ -1281,6 +1323,16 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
             report["nodes_checked"] += nodes_count
             continue
 
+        # Out of time: stop before the expensive per-node work. Everything
+        # cached above is free, so a part-done user still made progress and the
+        # changesets left over are picked up by the next run.
+        if deadline is not None and time.time() >= deadline:
+            report["partial"] = True
+            report["changesets_remaining"] = len(changesets) - i
+            print(f"  [{username}] time budget reached - {len(changesets) - i} "
+                  f"changeset(s) deferred to the next run")
+            break
+
         nodes = fetch_changeset_nodes(cs["id"], user_id)
         report["nodes_checked"] += len(nodes)
 
@@ -1305,24 +1357,20 @@ def patrol_user(username, user_id, territories, permissible, statuses, territory
                     si = statuses.get(ogf_id, {"status": "unknown"})
                     if si["status"] in ("unknown", "outline"):
                         continue
-                    if point_near_polygon(
-                        node["lon"], node["lat"],
-                        terr["outer_ring"],
-                        TERRITORY_BUFFER_DEG,
-                    ):
-                        near_boundary = True
-                        break
-                    if terr.get("holes"):
-                        for hole in terr["holes"]:
-                            if point_near_polygon(
-                                node["lon"], node["lat"],
-                                hole,
-                                TERRITORY_BUFFER_DEG,
-                            ):
-                                near_boundary = True
-                                break
-                        if near_boundary:
+                    near_boundary = False
+                    all_rings = [terr["outer_ring"]]
+                    all_rings.extend(terr.get("holes") or ())
+                    all_rings.extend(terr.get("parts") or ())
+                    for ring in all_rings:
+                        if point_near_polygon(
+                            node["lon"], node["lat"],
+                            ring,
+                            TERRITORY_BUFFER_DEG,
+                        ):
+                            near_boundary = True
                             break
+                    if near_boundary:
+                        break
                 if near_boundary:
                     continue
                 # Node is not inside any territory polygon (e.g., in the sea)
@@ -1716,6 +1764,14 @@ def init_db():
             PRIMARY KEY (changeset_id, territory_version)
         );
         CREATE INDEX IF NOT EXISTS idx_violations_version ON changeset_violations(territory_version);
+
+        CREATE TABLE IF NOT EXISTS user_progress (
+            territory_version TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (territory_version, user_id)
+        );
     """)
     conn.commit()
 
@@ -1731,6 +1787,35 @@ def init_db():
 
     conn.close()
     return conn
+
+def get_completed_users(territory_version):
+    """User IDs already fully patrolled under this territory version.
+
+    Used only for ordering: users still to recompute are patrolled first, so a
+    run that runs out of time has worked through the backlog rather than the
+    cheap cache hits.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM user_progress WHERE territory_version = ?",
+              (territory_version,))
+    ids = {row[0] for row in c.fetchall()}
+    conn.close()
+    return ids
+
+
+def record_user_completed(territory_version, user_id, username):
+    """Mark a user as fully patrolled under this territory version."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO user_progress "
+        "(territory_version, user_id, username, checked_at) VALUES (?, ?, ?, ?)",
+        (territory_version, user_id, username, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
 
 def get_cached_changeset(changeset_id):
     """Retrieve a changeset's nodes from the cache.
@@ -1764,7 +1849,8 @@ def cache_changeset(changeset_id, user_id, nodes):
     conn.commit()
     conn.close()
 
-CACHE_LOGIC_VERSION = "v2"  # Bump when violation detection logic changes (invalidates cache)
+CACHE_LOGIC_VERSION = "v3"  # Bump when violation detection logic changes (invalidates cache)
+                            # v3: rings beyond the first are parts (exclaves) unless nested in the outer ring
 
 def compute_territory_version(territories, statuses, permissible):
     """Compute a stable hash of territory data for cache invalidation.
@@ -1778,6 +1864,7 @@ def compute_territory_version(territories, statuses, permissible):
             k: {
                 "outer_len": len(v["outer_ring"]),
                 "holes": [len(h) for h in v.get("holes", [])],
+                "parts": [len(p) for p in v.get("parts", [])],
             }
             for k, v in sorted(territories.items())
         },
@@ -1973,6 +2060,52 @@ def get_notified_status(report, cls):
     else:
         return ""
 
+def carry_over_deferred(output, previous_path, deferred, detailed):
+    """Carry a deferred user's previous entry into the freshly generated output.
+
+    A user the time budget deferred has no verdict for the current territory
+    version, so dropping them would make the published JSON look as if they had
+    been cleared. Their last entry is carried over, flagged ``deferred`` and
+    annotated, until a later run recomputes them.
+    """
+    if not deferred or not os.path.exists(previous_path):
+        return 0
+    try:
+        with open(previous_path, encoding="utf-8") as f:
+            previous = json.load(f)
+    except (OSError, ValueError):
+        return 0
+
+    if detailed:
+        entries = previous.get("flagged_users", [])
+        present = {e.get("user_id") for e in output["flagged_users"]}
+    else:
+        entries = previous if isinstance(previous, list) else []
+        present = {e.get("name") for e in output}
+
+    note = "Deferred this run (territory data changed; cache refill in progress)"
+    carried = 0
+    for entry in entries:
+        key = entry.get("user_id") if detailed else entry.get("name")
+        if key is None or key in present or key not in deferred:
+            continue
+        entry = dict(entry)
+        entry["deferred"] = True
+        if detailed:
+            entry["notes"] = list(entry.get("notes") or []) + [note]
+            output["flagged_users"].append(entry)
+        else:
+            entry["notes"] = "; ".join(x for x in [entry.get("notes", ""), note] if x)
+            output.append(entry)
+        carried += 1
+
+    if carried:
+        if detailed:
+            output["flagged_users"].sort(key=lambda x: x.get("score", 0))
+        print(f"  Carried over {carried} deferred user(s) from the previous run")
+    return carried
+
+
 def generate_summary_json(all_reports, all_classifications, user_info):
     """Generate flat summary JSON matching new_users.json format.
     
@@ -2021,6 +2154,7 @@ def main():
     scp_target = None
     dry_run = False
     send_notifications = False
+    time_budget = DEFAULT_TIME_BUDGET
     
     args = sys.argv[1:]
     i = 0
@@ -2045,6 +2179,12 @@ def main():
         elif args[i] == "--notify":
             send_notifications = True
             i += 1
+        elif args[i] == "--time-budget" and i + 1 < len(args):
+            try:
+                time_budget = int(args[i + 1])
+            except ValueError:
+                print(f"  Ignoring invalid --time-budget value: {args[i + 1]}")
+            i += 2
         else:
             i += 1
     
@@ -2132,21 +2272,79 @@ def main():
 
     all_reports = []
     all_classifications = []
-    
+    checked_users = []      # patrolled to completion this run
+    deferred_users = []     # not reached, or reached only in part
+
     # Filter to target user if specified
     if target_user is not None:
         users = [u for u in users if u["id"] == target_user]
-    
+
+    # Cheap users are the ones whose changesets are all cached for this territory
+    # version; expensive ones still need the per-node raytracing. Patrol the
+    # expensive ones first, so when the time budget runs out the run has worked
+    # through the backlog and the next run resumes with what is left.
+    completed = get_completed_users(territory_version)
+    catchup = [u for u in users if u["id"] not in completed]
+    current = [u for u in users if u["id"] in completed]
+    users = catchup + current
+    if catchup:
+        print(f"  Cache: {len(current)} user(s) up to date for territory version "
+              f"{territory_version}, {len(catchup)} to recompute")
+
+    start_time = time.time()
+    loop_deadline = start_time + max(time_budget - TAIL_RESERVE_SECONDS, time_budget * 0.5)
+    print(f"  Time budget: {time_budget}s for the patrol, "
+          f"{TAIL_RESERVE_SECONDS}s held back for notifications and upload")
+
     for i, user in enumerate(users):
+        if time.time() >= loop_deadline:
+            deferred_users.extend(users[i:])
+            print(f"\n  Time budget reached - deferring {len(users) - i} "
+                  f"of {len(users)} user(s) to the next run")
+            break
         print(f"\n[{i+1}/{len(users)}] Patrolling {user['name']} (ID: {user['id']})...", flush=True)
         notified_at = notified_timestamps.get(_normalize_name(user["name"]))
-        report = patrol_user(user["name"], user["id"], territories, permissible, statuses, territory_version, notified_users, user.get("contacted_by"), notified_at)
+        report = patrol_user(user["name"], user["id"], territories, permissible, statuses,
+                             territory_version, notified_users, user.get("contacted_by"),
+                             notified_at, deadline=loop_deadline)
+        if report.get("partial"):
+            deferred_users.append(user)
+            print(f"  Partially checked - {user['name']} resumes on the next run")
+            continue
+        record_user_completed(territory_version, user["id"], user["name"])
+        checked_users.append(user)
         all_reports.append(report)
         classification = classify_user(user, report)
         all_classifications.append(classification)
         print_report(report, classification)
-    
+
     print_summary(all_reports, all_classifications)
+
+    if deferred_users:
+        names = ", ".join(u["name"] for u in deferred_users[:10])
+        if len(deferred_users) > 10:
+            names += f", +{len(deferred_users) - 10} more"
+        print(f"\n  CACHE REFILL IN PROGRESS")
+        print(f"  Checked {len(checked_users)} of {len(users)} user(s) this run")
+        print(f"  Deferred to the next run: {len(deferred_users)} ({names})")
+        print(f"  Deferred users keep their previous entry in the published JSON")
+
+    # Record what this run covered. patrolCron.sh reads it for the daily book and
+    # to report a cache refill in progress.
+    state_path = os.path.join(PATROL_DIR, "patrol_run_state.json")
+    run_state = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "territory_version": territory_version,
+        "time_budget_seconds": time_budget,
+        "elapsed_seconds": round(time.time() - start_time, 1),
+        "users_total": len(users),
+        "users_checked": len(checked_users),
+        "users_deferred": len(deferred_users),
+        "users_to_recompute": len(catchup),
+        "deferred_users": [u["name"] for u in deferred_users],
+    }
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(run_state, f, indent=2, ensure_ascii=False)
     
     # ─── Send Notifications ──────────────────────────────────────────────────
     
@@ -2185,7 +2383,7 @@ def main():
                 users_to_notify = []
                 successfully_notified = []
                 
-                for report, cls, user_info in zip(all_reports, all_classifications, users):
+                for report, cls, user_info in zip(all_reports, all_classifications, checked_users):
                     # Check if user should be notified:
                     # 1. Classification is needs_review or worse
                     # 2. Has violations
@@ -2245,14 +2443,20 @@ def main():
         
         # Save detailed JSON
         detailed_path = os.path.join(PATROL_DIR, "new_users_patrol.json")
-        json_output_data = generate_json_output(all_reports, all_classifications, users)
+        json_output_data = generate_json_output(all_reports, all_classifications, checked_users)
+        json_output_data["users_checked"] = len(checked_users)
+        json_output_data["users_deferred"] = len(deferred_users)
+        carry_over_deferred(json_output_data, detailed_path,
+                            {u["id"] for u in deferred_users}, detailed=True)
         with open(detailed_path, "w", encoding="utf-8") as f:
             json.dump(json_output_data, f, indent=2, ensure_ascii=False)
         print(f"  Detailed report saved: {detailed_path}")
         
         # Save summary JSON (flat format matching new_users.json)
         summary_path = os.path.join(PATROL_DIR, "new_users_patrol_summary.json")
-        summary_output = generate_summary_json(all_reports, all_classifications, users)
+        summary_output = generate_summary_json(all_reports, all_classifications, checked_users)
+        carry_over_deferred(summary_output, summary_path,
+                            {u["name"] for u in deferred_users}, detailed=False)
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary_output, f, indent=2, ensure_ascii=False)
         print(f"  Summary report saved: {summary_path}")
