@@ -13,12 +13,15 @@ Patterns replaced:
   - OGF way/relation/node/changeset URLs → respective templates
   - OGF user profile URLs → {{OGF user|username}} or {{OGF user|username|history}}
   - OGF message/new URLs → {{OGF user|username|msg}} or {{OGF user|username|msg|text=...}}
+  - The OGF API endpoint (https://opengeofiction.net/api) → {{api}}, swallowing
+    any <pre>/<code>/<nowiki> wrapper holding nothing but that URL
   - Wikilink forms [URL display_text] preserve display text in template params
   - {{#multimaps:...}} blocks are protected — URLs inside them are never modified
 
 Credentials: ~/ogf-user.env (USERNAME, PASSWORD)
 """
 
+import bisect
 import datetime
 import json
 import random
@@ -289,6 +292,170 @@ def load_territory_lookup():
 
 
 # ---------------------------------------------------------------------------
+# OGF API endpoint → {{api}}
+# ---------------------------------------------------------------------------
+# https://opengeofiction.net/api appears in wiki instructions (most often as
+# the URL to paste into JOSM's "OSM Server URL" field).  The bare URL is a
+# genuine weblink, but a {{api}} template exists which renders it as literal,
+# non-linked text — so it is converted, and the surrounding markup normally
+# used to defeat linking (<pre>, <code>, <nowiki>) is swallowed with it, since
+# the template renders its own <code> wrapper.
+API_URL_PAT = re.compile(
+    r"https?://(?:www\.)?opengeofiction\.net/api/?"
+    r"(?![A-Za-z0-9/_\-?&=#%~])",
+    re.IGNORECASE,
+)
+
+# Wrapper tags which may hold exactly one URL.  Nesting must be pre > code > nowiki.
+TAG_PAT = re.compile(
+    r"<(/?)(pre|code|nowiki|includeonly|noinclude|onlyinclude)(?:\s[^>]*)?>",
+    re.IGNORECASE,
+)
+_SWALLOWABLE_TAGS = {"pre", "code", "nowiki"}
+_WRAPPER_DEPTH = {"pre": 0, "code": 1, "nowiki": 2}
+# Tags whose contents MediaWiki does not parse, plus template-source blocks:
+# a {{api}} left inside one would be shown literally as "{{api}}" (or, for
+# Template: pages, would make the template transclude itself), so any URL still
+# enclosed by one of these is left untouched.
+_SKIP_IF_ENCLOSING = {"pre", "nowiki", "includeonly", "noinclude", "onlyinclude"}
+
+
+def _scan_wrapper_tags(text):
+    """Return [(start, end, is_close, name)] for every wrapper/container tag."""
+    return [
+        (m.start(), m.end(), bool(m.group(1)), m.group(2).lower())
+        for m in TAG_PAT.finditer(text)
+    ]
+
+
+def _enclosing_tags(text, tags, pos):
+    """Return the wrapper tags still open at pos, outermost first."""
+    stack = []
+    for tstart, _tend, is_close, name in tags:
+        if tstart >= pos:
+            break
+        if is_close:
+            if name in stack:
+                del stack[len(stack) - 1 - stack[::-1].index(name):]
+        else:
+            stack.append(name)
+    return stack
+
+
+def _swallow_wrappers(text, tags, start, end):
+    """Consume balanced <pre>/<code>/<nowiki> wrappers holding only the URL.
+
+    Returns (new_start, new_end, swallowed, enclosing) where swallowed lists
+    the tag names consumed (innermost first) and enclosing is the full stack of
+    tags open at the URL.  Nothing is consumed unless the whole inner run of
+    tags closes again immediately after the URL.
+    """
+    tag_ends = [t[1] for t in tags]
+    tag_starts = [t[0] for t in tags]
+
+    swallowed = []
+    new_start = start
+    idx = bisect.bisect_right(tag_ends, start) - 1
+    while idx >= 0:
+        tstart, tend, is_close, name = tags[idx]
+        if (is_close or name not in _SWALLOWABLE_TAGS
+                or text[tend:new_start].strip() or name in swallowed):
+            break
+        swallowed.append(name)
+        new_start = tstart
+        idx -= 1
+
+    enclosing = _enclosing_tags(text, tags, start)
+    if not swallowed:
+        return start, end, [], enclosing
+
+    # Valid nesting only: pre > code > nowiki, no tag twice.
+    depths = [_WRAPPER_DEPTH[n] for n in swallowed]
+    if depths != sorted(depths, reverse=True) or len(set(swallowed)) != len(swallowed):
+        return start, end, [], enclosing
+
+    # Closing tags must mirror the opening tags immediately after the URL.
+    jdx = bisect.bisect_left(tag_starts, end)
+    new_end = cursor = end
+    for expect in swallowed:
+        if jdx >= len(tags):
+            return start, end, [], enclosing
+        tstart, tend, is_close, name = tags[jdx]
+        if not is_close or name != expect or text[cursor:tstart].strip():
+            return start, end, [], enclosing
+        new_end = tend
+        cursor = tend
+        jdx += 1
+
+    return new_start, new_end, swallowed, enclosing
+
+
+def _inside_template(text, pos):
+    """True when pos sits inside a {{...}} invocation."""
+    stack = 0
+    i = 0
+    n = len(text)
+    while i < n - 1:
+        if text.startswith("{{", i):
+            stack += 1
+            i += 2
+            continue
+        if text.startswith("}}", i):
+            if stack:
+                stack -= 1
+            i += 2
+            continue
+        if i == pos:            # reached the URL while at least one {{ is open
+            return stack > 0
+        i += 1
+    return False
+
+
+def replace_api_links(content):
+    """Replace bare OGF API endpoint URLs with {{api}}.
+
+    Returns (new_content, changes).  A URL is left alone when it sits inside a
+    template invocation (where a template call would corrupt the parameter) or
+    inside a <pre>/<nowiki> block it cannot be pulled out of.
+    """
+    changes = []
+    tags = _scan_wrapper_tags(content)
+
+    out = []
+    pos = 0
+    for m in API_URL_PAT.finditer(content):
+        start, end = m.start(), m.end()
+        if start < pos or _inside_template(content, start):
+            continue
+
+        new_start, new_end, swallowed, enclosing = _swallow_wrappers(
+            content, tags, start, end
+        )
+        # Tags that stay around the URL (it was not the only thing they held).
+        # `enclosing` is outermost-first, `swallowed` innermost-first.
+        if swallowed and enclosing[-len(swallowed):] == swallowed[::-1]:
+            remaining = enclosing[:-len(swallowed)]
+        else:
+            remaining = enclosing
+        if any(t in _SKIP_IF_ENCLOSING for t in remaining):
+            continue  # would render as literal "{{api}}"
+
+        out.append(content[pos:new_start])
+        out.append("{{api}}")
+        pos = new_end
+        if swallowed:
+            wrappers = "".join(f"<{t}>" for t in reversed(swallowed))
+            changes.append(f"api link → {{{{api}}}} (swallowed {wrappers})")
+        else:
+            changes.append("api link → {{api}}")
+
+    if not changes:
+        return content, changes
+    out.append(content[pos:])
+    return "".join(out), changes
+
+
+# ---------------------------------------------------------------------------
 # Wikitext transformation
 # ---------------------------------------------------------------------------
 def transform_wikitext(content, territory_map):
@@ -342,6 +509,13 @@ def transform_wikitext(content, territory_map):
         return "".join(result)
 
     content = _protect_multimaps(content)
+
+    # ---- Pass 0: OGF API endpoint URL → {{api}} ------------------------
+    # Done before the link patterns below: the endpoint carries no object ID
+    # or coordinates, and any <pre>/<code>/<nowiki> wrapper around it is part
+    # of the same edit.
+    content, api_changes = replace_api_links(content)
+    changes.extend(api_changes)
 
     # ---- Pass 1: Replace opengeofiction.net object/map URLs ------------
     # Map URL:  #map=Z/LAT/LON[&...]
@@ -1064,6 +1238,12 @@ def main():
     total_edits = 0
     total_pages_changed = 0
     for idx, title in enumerate(titles):
+        # Template source and the bot's own pages legitimately contain bare
+        # URLs — {{api}} documents the endpoint inside <includeonly>, and the
+        # action log quotes orphan URLs — so never edit them.
+        if title.startswith("Template:") or title.startswith("User:Brothie"):
+            print(f"Skipping {title} (excluded page)")
+            continue
         if len(titles) > 1:
             print(f"\n--- [{idx + 1}/{len(titles)}] {title} ---")
         else:
