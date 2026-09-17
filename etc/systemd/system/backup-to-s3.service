@@ -4,4 +4,4 @@ Description=OpenGeofiction backup service to AWS S3
 [Service]
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/backupToS3.sh /opt/opengeofiction/backup-to-s3-queue s3://opengeofiction-backups STANDARD_IA
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/backupToS3.sh /opt/opengeofiction/backup-to-s3-queue s3://opengeofiction-backups STANDARD_IA

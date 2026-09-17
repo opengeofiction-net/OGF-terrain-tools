@@ -6,6 +6,6 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/promote-diary-entry.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/promote-diary-entry.sh
 [Install]
 WantedBy=default.target

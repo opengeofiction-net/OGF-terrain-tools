@@ -7,6 +7,6 @@ Type=oneshot
 User=ogf
 Group=ogf
 EnvironmentFile=/etc/opengeofiction/db.env
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/changesetInfo.pl -host localhost -user ${DB_USER} -db ${DB_NAME} -password ${DB_PASSWORD} -od /opt/opengeofiction/ip-data
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/changesetInfo.pl -host localhost -user ${DB_USER} -db ${DB_NAME} -password ${DB_PASSWORD} -od /opt/opengeofiction/ip-data
 [Install]
 WantedBy=default.target

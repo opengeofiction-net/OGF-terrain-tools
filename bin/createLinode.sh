@@ -104,7 +104,7 @@ runcmd:
   # initialise OGF scripts
   - mkdir -p /opt/opengeofiction/tmp
   - chown -R ogf:ogf /opt/opengeofiction
-  - sudo -u ogf git clone https://github.com/opengeofiction-net/OGF-terrain-tools.git /opt/opengeofiction/OGF-terrain-tools
+  - sudo -u ogf git clone https://github.com/opengeofiction-net/ogf-server-scripts.git /opt/opengeofiction/ogf-server-scripts
 EOF
 cloudinit=$(base64 -w0 $TIMESTAMP.yml)
 

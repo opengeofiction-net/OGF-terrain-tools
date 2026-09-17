@@ -4,7 +4,7 @@ Description=Regenerate Apache editor-IP RewriteMap from changeset data
 [Service]
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/generateEditorIpAllowlist.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/generateEditorIpAllowlist.sh
 
 [Install]
 WantedBy=default.target

@@ -5,7 +5,7 @@
 #
 # The zones are produced on the utility server - see Admin:Elevation process
 #
-# /opt/opengeofiction/OGF-terrain-tools/bin/fetchDemData.sh <style> [zone ...]
+# /opt/opengeofiction/ogf-server-scripts/bin/fetchDemData.sh <style> [zone ...]
 #
 # With no zones named, the zones to load are whatever dem/active-zones.txt says.
 # That list is about rendering, not publishing: a zone can be published and
@@ -55,7 +55,7 @@ ZFACTOR=${ZFACTOR:-z2}
 # 1/2048 keeps a level available for each; past a source's own size they cost
 # almost nothing, every level being a quarter of the one before
 OVERVIEWS=${OVERVIEWS:-"2 4 8 16 32 64 128 256 512 1024 2048"}
-TOOLS=${TOOLS:-/opt/opengeofiction/OGF-terrain-tools}
+TOOLS=${TOOLS:-/opt/opengeofiction/ogf-server-scripts}
 OSM2PGSQL_STYLE=${TOOLS}/etc/cyclogf_contours.style
 RAMP=${RAMP:-/opt/opengeofiction/map-styles/${STYLE}/dem/shade.ramp}
 CHANGED_ZONES=${BASE}/changed-zones
@@ -241,7 +241,7 @@ gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
 # Loaded from scratch, there being no incremental update to do, and no --slim for
 # the same reason, which keeps the database a good deal smaller.
 #
-# The published files come out of demContoursToOsm.py sorted by type and id, so
+# The published files come out of Danu sorted by type and id, so
 # there is nothing to sort here. Older files, from phyghtmap, interleaved node
 # and way blocks and needed sorting first, so it is checked rather than assumed -
 # osmium merge would otherwise fail halfway through the load

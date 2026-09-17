@@ -8,7 +8,7 @@ use LWP::Simple;
 use Encode;
 use feature 'unicode_strings' ;
 use utf8;
-use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
+use lib '/opt/opengeofiction/ogf-server-scripts/lib';
 use OGF::Util::File;
 use OGF::Util::Usage qw( usageInit usageError );
 

@@ -75,8 +75,19 @@ OUTFILE_NAMES = {"default": "ogf_polygons", "test": "test_polygons"}
 # Example: VERIFY_IGNORE = {459229: "TA250"}
 VERIFY_IGNORE = {}
 
-# Simplification thresholds to compute
-THRESHOLDS = [50]
+# Simplification thresholds to compute: the first is primary, saved as territory.json and errors output
+THRESHOLDS = [50, 1, 10, 200]
+
+# Smallest ring, in square pixels at the computation zoom, worth emitting when a
+# ring is preserved below the threshold (see the polygon assembly). Below this it
+# is simplification debris or a way that never closed into a ring.
+MIN_RING_PX_AREA = 0.25
+
+# Floor for the iterative re-simplification of a preserved ring: threshold/2,
+# threshold/4 and so on down to this, after which the ring is emitted
+# unsimplified. Halving once is not always enough - a ring only a few pixels
+# across collapses to a line at threshold/2 as well, and would be lost.
+MIN_RING_PX_THRESHOLD = 1.0
 
 # Web Mercator constants
 WGS84_SEMI_MAJOR = 6378137.0
@@ -317,7 +328,7 @@ def build_way_sequence(way_info):
         list of dicts, each with 'nodes', 'start', 'end'
     """
     # Work on a copy
-    hWays = {wid: dict(info) for wid, info in way_info.items()}
+    hWays = {wid: dict(info, ways=[wid]) for wid, info in way_info.items()}
     if not hWays:
         return []
 
@@ -350,6 +361,7 @@ def build_way_sequence(way_info):
                 if oid is not None and oid in hWays:
                     o = hWays[oid]
                     o['nodes'].reverse()
+                    o['ways'].reverse()
                     idS2, idE2 = o['nodes'][0], o['nodes'][-1]
                     if idE2 in ptStart:
                         del ptStart[idE2]
@@ -364,6 +376,7 @@ def build_way_sequence(way_info):
                 if oid in hWays:
                     o = hWays[oid]
                     o['nodes'].extend(w['nodes'][1:])  # skip duplicate start
+                    o['ways'].extend(w['ways'])
                     del hWays[wid]
                     del ptEnd[idS]
                     # Clean up absorbed way's other endpoint
@@ -382,6 +395,7 @@ def build_way_sequence(way_info):
                 if oid in hWays:
                     o = hWays[oid]
                     w['nodes'].extend(o['nodes'][1:])  # skip duplicate
+                    w['ways'].extend(o['ways'])
                     idE = w['nodes'][-1]
                     del hWays[oid]
                     # Clean up absorbed way's other endpoint
@@ -403,6 +417,7 @@ def build_way_sequence(way_info):
     for wid, w in hWays.items():
         result.append({
             'nodes': w['nodes'],
+            'ways': w['ways'],
             'start': w['nodes'][0],
             'end': w['nodes'][-1],
         })
@@ -466,6 +481,72 @@ def fetch_territories(dataset):
 # ---------------------------------------------------------------------------
 # Bounding rectangle
 # ---------------------------------------------------------------------------
+
+def simplify_ring_points(node_ids, nodes, to_pixel, threshold):
+    """Simplify a ring given as a list of node IDs, at the given threshold.
+
+    Returns a list of [lat, lon] points, or None if any node is missing from the
+    OSM data. Used to re-emit a ring that would otherwise be dropped, at a finer
+    threshold, so small exclaves survive.
+    """
+    pts = []
+    for nid in node_ids:
+        if nid not in nodes:
+            return None
+        lat, lon = nodes[nid]
+        pts.append(to_pixel(lon, lat))
+
+    if len(pts) > 2:
+        indices = alg_visvalingam_whyatt(pts, threshold, index_only=True)
+    else:
+        indices = list(range(len(pts)))
+
+    out = []
+    for i in indices:
+        lat, lon = nodes[node_ids[i]]
+        out.append([lat, lon])
+    return out
+
+
+def is_real_ring(points, to_pixel):
+    """True if the points are a polygon rather than a line or a sub-pixel stub.
+
+    Two nodes mean a way that never closed into a ring; a bounding box under
+    MIN_RING_PX_AREA is simplification debris. Both used to be dropped and still are.
+    """
+    if not points or len(points) < 3:
+        return False
+    xs = []
+    ys = []
+    for lat, lon in points:
+        px, py = to_pixel(lon, lat)
+        xs.append(px)
+        ys.append(py)
+    return (max(xs) - min(xs)) * (max(ys) - min(ys)) >= MIN_RING_PX_AREA
+
+
+def preserve_ring(node_ids, nodes, to_pixel, threshold):
+    """Re-emit a ring that would otherwise be dropped below the threshold.
+
+    Iteratively re-simplifies at threshold/2, threshold/4, ... until the ring
+    survives as a real polygon, and finally falls back to the unsimplified ring -
+    a ring smaller than the smallest triangle the simplifier keeps has no coarser
+    form that still closes. Returns [lat, lon] points, or None if the ring is not
+    a polygon at any resolution (a way that never closed, or debris).
+    """
+    t = threshold / 2.0
+    while t >= MIN_RING_PX_THRESHOLD:
+        points = simplify_ring_points(node_ids, nodes, to_pixel, t)
+        if is_real_ring(points, to_pixel):
+            return points
+        t /= 2.0
+
+    points = simplify_ring_points(node_ids, nodes, to_pixel, 0.0)
+    if is_real_ring(points, to_pixel):
+        logging.debug("ring preserved at full resolution (%d node(s))", len(node_ids))
+        return points
+    return None
+
 
 def bounding_rectangle(way_nodes, nodes, to_pixel):
     """Compute bounding rectangle of a way in pixel coordinates."""
@@ -696,6 +777,9 @@ def run(args):
                 way_id = neg_ct
                 ctx3_ways[way_id] = {
                     'nodes': seq['nodes'],
+                    # Pre-simplification nodes, so a ring that would be dropped
+                    # can be rebuilt at threshold/2 instead of being lost.
+                    'orig_nodes': list(node_ids),
                     'id': way_id,
                 }
 
@@ -705,10 +789,12 @@ def run(args):
 
         # Build polygons for each relation
         polygons = {}
+        preserved_small_rings = 0
 
         for rid, way_ids in ctx3_rels.items():
             # Get all simplified ways for this relation
             rel_way_info = {}
+            rel_way_info_fine = {}
             for wid in way_ids:
                 if wid in ctx3_ways:
                     w = ctx3_ways[wid]
@@ -716,6 +802,12 @@ def run(args):
                         'nodes': list(w['nodes']),
                         'start': w['nodes'][0],
                         'end': w['nodes'][-1],
+                    }
+                    orig = w['orig_nodes']
+                    rel_way_info_fine[wid] = {
+                        'nodes': list(orig),
+                        'start': orig[0],
+                        'end': orig[-1],
                     }
 
             if not rel_way_info:
@@ -745,6 +837,7 @@ def run(args):
                 poly_rings.append({
                     'rect_area': rect_area,
                     'points': points,
+                    'ways': ow['ways'],
                 })
 
             if not poly_rings:
@@ -752,9 +845,35 @@ def run(args):
 
             # Sort by area descending, preserve largest, filter small ones
             poly_rings.sort(key=lambda r: r['rect_area'], reverse=True)
+
+            # A ring below the threshold is normally dropped as map clutter, but
+            # it can be real territory - an exclave, such as Plevia's Isole
+            # Libeccie, or an enclave belonging to a neighbour - so instead of
+            # dropping it, preserve_ring() re-simplifies it at threshold/2,
+            # threshold/4, ... and finally unsimplified, until it is a polygon
+            # again. The rebuild is lazy: only rings that would actually be
+            # dropped pay for it, which is a handful across the whole dataset.
             for i in range(1, len(poly_rings)):
                 if poly_rings[i]['rect_area'] < threshold:
-                    poly_rings[i] = None
+                    ring_ways = [w for w in poly_rings[i]['ways'] if w in rel_way_info_fine]
+                    seqs = build_way_sequence({w: rel_way_info_fine[w] for w in ring_ways})
+                    if len(seqs) == 1:
+                        fine = preserve_ring(seqs[0]['nodes'], nodes, to_pixel, threshold)
+                    else:
+                        fine = None
+                        logging.debug("rel %s: dropped ring assembled %d sequence(s) "
+                                      "instead of 1 - not preserved", rid, len(seqs))
+                    if fine:
+                        poly_rings[i] = {
+                            'rect_area': poly_rings[i]['rect_area'],
+                            'points': fine,
+                        }
+                        preserved_small_rings += 1
+                    else:
+                        logging.debug("rel %s: dropped ring (%d way(s), coarse area %.4f) is "
+                                      "not a polygon at any resolution - dropped",
+                                      rid, len(ring_ways), poly_rings[i]['rect_area'])
+                        poly_rings[i] = None
 
             result = [r['points'] for r in poly_rings if r is not None]
             if len(result) == 1:
@@ -802,14 +921,15 @@ def run(args):
                 sys.stderr.write("\n")
 
         # Write errors JSON (only for the primary threshold, traditionally 50)
-        err_file = f"{output_dir}/{outfile_name}_errors.json"
-        with open(err_file, 'w', encoding='utf-8') as f:
-            json.dump(errors, f, indent=2)
-            f.write("\n")
+        if threshold == THRESHOLDS[0]:
+            err_file = f"{output_dir}/{outfile_name}_errors.json"
+            with open(err_file, 'w', encoding='utf-8') as f:
+                json.dump(errors, f, indent=2)
+                f.write("\n")
 
-        if copy_to and os.path.isdir(copy_to):
-            pub_file = f"{copy_to}/territory_errors.json"
-            shutil.copy2(err_file, pub_file)
+            if copy_to and os.path.isdir(copy_to):
+                pub_file = f"{copy_to}/territory_errors.json"
+                shutil.copy2(err_file, pub_file)
 
         if errors:
             # Print errors to stderr for debugging
@@ -823,10 +943,17 @@ def run(args):
         write_polygon_json(poly_file, polygons)
 
         if copy_to and os.path.isdir(copy_to):
-            pub_file = f"{copy_to}/territory.json"
+            pub_file = f"{copy_to}/territory_{threshold}.json"
             shutil.copy2(poly_file, pub_file)
+            if threshold == THRESHOLDS[0]:
+                pub_file = f"{copy_to}/territory.json"
+                shutil.copy2(poly_file, pub_file)
 
         logging.info("Threshold %d: wrote %d polygons to %s", threshold, len(polygons), poly_file)
+        if preserved_small_rings:
+            logging.info("Threshold %d: kept %d ring(s) below the threshold, "
+                         "re-simplified at %g", threshold, preserved_small_rings,
+                         threshold / 2.0)
 
 # ---------------------------------------------------------------------------
 # CLI

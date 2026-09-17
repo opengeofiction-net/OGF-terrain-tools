@@ -8,7 +8,7 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/osmdbtReplication.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/osmdbtReplication.sh
 
 [Install]
 WantedBy=default.target

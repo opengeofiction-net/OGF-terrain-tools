@@ -6,6 +6,6 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/topAccessIps.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/topAccessIps.sh
 [Install]
 WantedBy=default.target

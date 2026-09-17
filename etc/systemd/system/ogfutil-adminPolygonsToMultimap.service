@@ -6,10 +6,10 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/adminPolygonsToMultimap.pl -od /opt/opengeofiction/multimaps -copyto /opt/opengeofiction/sync-to-ogf/utility
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/adminPolygonsToMultimapTimezone.pl -od /opt/opengeofiction/multimaps -copyto /opt/opengeofiction/sync-to-ogf/utility
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/overpassCacheEconomy.pl -od /opt/opengeofiction/economy -copyto /opt/opengeofiction/sync-to-ogf/utility
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/overpassCacheAirports.pl -od /opt/opengeofiction/airports -copyto /opt/opengeofiction/sync-to-ogf/utility
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/adminPolygonsToMultimap.pl -od /opt/opengeofiction/multimaps -copyto /opt/opengeofiction/sync-to-ogf/utility
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/adminPolygonsToMultimapTimezone.pl -od /opt/opengeofiction/multimaps -copyto /opt/opengeofiction/sync-to-ogf/utility
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/overpassCacheEconomy.pl -od /opt/opengeofiction/economy -copyto /opt/opengeofiction/sync-to-ogf/utility
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/overpassCacheAirports.pl -od /opt/opengeofiction/airports -copyto /opt/opengeofiction/sync-to-ogf/utility
 
 [Install]
 WantedBy=default.target

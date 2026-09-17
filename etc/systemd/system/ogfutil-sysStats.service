@@ -6,6 +6,6 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/sysStats.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/sysStats.sh
 [Install]
 WantedBy=default.target

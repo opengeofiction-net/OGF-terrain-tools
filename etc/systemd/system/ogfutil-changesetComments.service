@@ -7,6 +7,6 @@ Type=oneshot
 User=ogf
 Group=ogf
 EnvironmentFile=/etc/opengeofiction/db.env
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/dumpChangesetComments.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/dumpChangesetComments.sh
 [Install]
 WantedBy=default.target

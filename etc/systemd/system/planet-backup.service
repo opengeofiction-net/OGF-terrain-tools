@@ -10,7 +10,7 @@ Group=ogf
 # PLANET_BACKUP_MODE=local|spinup and, for spinup, LINODE_CLI_TOKEN. Absent
 # file means a local backup
 EnvironmentFile=-/etc/opengeofiction/planet-backup.env
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/planetBackupRun.sh /opt/opengeofiction/backup ogfdevapi /var/www/html/data.opengeofiction.net/public_html/backups
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/planetBackupRun.sh /opt/opengeofiction/backup ogfdevapi /var/www/html/data.opengeofiction.net/public_html/backups
 
 [Install]
 WantedBy=default.target

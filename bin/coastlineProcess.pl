@@ -1,7 +1,7 @@
 #! /usr/bin/perl -w
 # 
 
-use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
+use lib '/opt/opengeofiction/ogf-server-scripts/lib';
 use strict;
 use warnings;
 use File::Copy;

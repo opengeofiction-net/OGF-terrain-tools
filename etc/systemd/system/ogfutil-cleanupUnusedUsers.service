@@ -9,6 +9,6 @@ Type=oneshot
 User=ogf
 Group=ogf
 EnvironmentFile=/etc/opengeofiction/db.env
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/cleanupUnusedUsers.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/cleanupUnusedUsers.sh
 [Install]
 WantedBy=default.target

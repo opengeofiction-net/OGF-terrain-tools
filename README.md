@@ -1,7 +1,7 @@
-# OGF-terrain-tools
+# ogf-server-scripts
 
 Scripts, systemd units and configuration for running [OpenGeofiction](https://opengeofiction.net).
-Checked out on each server at `/opt/opengeofiction/OGF-terrain-tools` and run
+Checked out on each server at `/opt/opengeofiction/ogf-server-scripts` and run
 from there, mostly by the systemd units in `etc/systemd/system`.
 
 Not a Perl distribution, despite the history: there is nothing to install and no
@@ -18,7 +18,7 @@ repository.
 | --- | --- |
 | `bin/*.sh` | backups, Overpass, tile rendering and replication, site up and down |
 | `bin/*.pl` | Overpass-driven jobs - coastline, territory polygons, continents, user lists, activity - and log analysis |
-| `bin/dem*` | the elevation process: contour squares to DEM, hillshade, relief and contours |
+| `bin/fetchDemData.sh`, `bin/renderDemZones.sh`, `bin/demExpireTiles.py` | the consuming half of the elevation process: fetch what Danu published, load it, expire the tiles it changed |
 | `lib/OGF/` | the Perl the above share: an OSM data model, Overpass, geometry |
 | `etc/systemd/system/` | the units which run all of it |
 | `etc/` | PostgreSQL tuning, Apache configuration, render style patches |
@@ -34,15 +34,21 @@ password and url.
 
 ## The elevation process
 
-Contours are drawn by hand, one `.osm` file per degree square, and are the source
-of everything else. `buildDemData.sh` on the utility server builds the zones
-whose squares have changed; `fetchDemData.sh` on a tile server fetches the
-result and loads it.
+The elevation pipeline lives in [danu](https://github.com/opengeofiction-net/danu)
+and is installed from the `danu-server` package. It builds the DEM from the
+contour squares mappers draw and publishes the rasters and contour extracts.
 
-    buildDemData.sh [zone ...]      # all changed zones, or the ones named
-    buildDemZone.sh <zone>          # one zone, start to finish
-    demMakeSquare.py <dir> N42E017  # a blank square to draw in
-    demRecoverSquares.py …          # squares back out of a DEM, for a lost zone
+What stays here is the consuming half, which runs on the tile servers and knows
+nothing about how the rasters were made:
+
+    fetchDemData.sh <style> [zone ...]   # fetch what Danu published and load it
+    renderDemZones.sh <style>            # expire the tiles over what changed
+
+The interface between the two is a published directory and a manifest:
+`active-zones.txt`, `<zone>/hillshade-<zfactor>.tif` and
+`<zone>/contours-<zone>.osm.pbf` under `data.opengeofiction.net/dem`. Nothing is
+imported across; changing one of those three is changing another repository's
+input.
 
 See *Admin:Elevation process* in the wiki for what it produces and why, and
 *Admin:Coastline process* for the sea level data it depends on.
@@ -51,10 +57,22 @@ See *Admin:Elevation process* in the wiki for what it produces and why, and
 
 This began as a Perl distribution written by Thilo Stapff for turning
 hand-drawn contours into elevation tiles, and grew the operational scripts
-later. The terrain half was replaced by a GDAL pipeline in August 2026 and the
-Perl behind it removed; it remains at the tag `thilo-dem-process`, and what it
-could do is written up in *Admin:Elevation process*. Rather more than contour
-conversion, as it turns out.
+later. It descends from
+[opengeofiction/ogf-server-scripts](https://github.com/opengeofiction/ogf-server-scripts),
+which is where that work was published and which has been dormant since
+November 2024. Everything here is downstream of it, and the link is recorded
+in prose because a repository's own history does not say so once it stands on
+its own.
+
+Three things happened in 2026. In August the terrain half was replaced by a
+GDAL pipeline and the Perl behind it removed; it remains at the tag
+`thilo-dem-process`, under the name the repository had then, and what it could
+do is written up in *Admin:Elevation process* - rather more than contour
+conversion, as it turns out. In September the elevation pipeline moved out
+altogether to [danu](https://github.com/opengeofiction-net/danu), which owns it
+end to end and leaves only the consuming half here. And the repository was
+renamed from `ogf-server-scripts` to `ogf-server-scripts`, to say what it is
+rather than what it was.
 
 ## Licence
 
