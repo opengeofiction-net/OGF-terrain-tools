@@ -241,7 +241,7 @@ gdalbuildvrt -overwrite ${BASE}/shade.vrt ${BASE}/shade/*.tif
 # Loaded from scratch, there being no incremental update to do, and no --slim for
 # the same reason, which keeps the database a good deal smaller.
 #
-# The published files come out of demContoursToOsm.py sorted by type and id, so
+# The published files come out of Danu sorted by type and id, so
 # there is nothing to sort here. Older files, from phyghtmap, interleaved node
 # and way blocks and needed sorting first, so it is checked rather than assumed -
 # osmium merge would otherwise fail halfway through the load

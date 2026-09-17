@@ -28,27 +28,24 @@ for the API user, password and url.
 
 ### Elevation
 
-Contours are drawn by hand, one `.osm` per degree square under
-`/opt/opengeofiction/elevation/osm-squares/<zone>/`, and are the source of
-everything else. GDAL does the raster work; no Perl is involved.
+The pipeline which builds the DEM is not here. It moved to
+[danu](https://github.com/opengeofiction-net/danu) and is installed from the
+`danu-server` package: `danu-build`, `danu-build-zone`, `danu-square` and the
+rest, configured by `/etc/danu/danu.conf`.
+
+What remains here is the consuming half, on the tile servers:
 
 ```bash
-# on the utility server: every zone whose squares have changed
-bin/buildDemData.sh [zone ...]
-
-# one zone, start to finish. KEEP_WORK=1 to keep the intermediates
-bin/buildDemZone.sh <zone>
-
-# a blank square for ground nobody has drawn
-bin/demMakeSquare.py <outdir> N42E017 S03W121
-
-# squares back out of a DEM, for a zone whose source was lost
-bin/demRecoverSquares.py <dem.tif> <outdir> --water <water.osm.pbf>
-
-# on a tile server: fetch what was published and load it
+# fetch what Danu published and load it into the render database
 bin/fetchDemData.sh <style> [zone ...]
+
+# expire the tiles over the zones which changed
 bin/renderDemZones.sh <style>
 ```
+
+These know nothing about how the rasters were made. They read three published
+files - `active-zones.txt`, `<zone>/hillshade-<zfactor>.tif` and
+`<zone>/contours-<zone>.osm.pbf` - and that is the whole interface.
 
 ### Operational Scripts
 
@@ -251,20 +248,9 @@ Scripts accept tile ranges in two formats:
 
 ### Elevation Processing
 
-Per zone, `buildDemZone.sh`, all of it GDAL:
-
-1. `demZoneExtent.py` decides which squares hold contours, and the grids - 1
-   arcsecond for the master, 3 for the archive and the compatibility zip. Both
-   grid registered, SRTM style, corner half a pixel outside the degree
-2. `ogr2ogr` collects every way with a numeric `ele` - contours and the water
-   edges at zero alike - through `etc/dem_osmconf.ini`, which exists because
-   GDAL's default ignores `ele`
-3. `gdal_rasterize`, then `gdal_fillnodata` bounded to 1.85 km
-4. `demLandClamp.py` separates land at sea level from the sea itself
-5. a box filter through a VRT kernel, for hillshading only
-6. `gdalwarp` to mercator, `gdaldem` for hillshade and relief
-7. `gdal_contour` and `demContoursToOsm.py` for the contour vectors
-8. `.hgt` slices, the compatibility zip, publish, then `demZoneStats.py`
+How a zone is built - the extent, the rasterise, the interpolation, the land
+and sea separation, the hillshades, the contour vectors and the `.hgt` slices -
+is Danu's, and documented there. Nothing in this repository needs to know.
 
 `dem/active-zones.txt` says which zones the renderers should load, which is a
 different question from which are published - see `elevation/inactive`.
