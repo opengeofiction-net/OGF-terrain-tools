@@ -18,7 +18,7 @@ repository.
 | --- | --- |
 | `bin/*.sh` | backups, Overpass, tile rendering and replication, site up and down |
 | `bin/*.pl` | Overpass-driven jobs - coastline, territory polygons, continents, user lists, activity - and log analysis |
-| `bin/dem*` | the elevation process: contour squares to DEM, hillshade, relief and contours |
+| `bin/fetchDemData.sh`, `bin/renderDemZones.sh`, `bin/demExpireTiles.py` | the consuming half of the elevation process: fetch what Danu published, load it, expire the tiles it changed |
 | `lib/OGF/` | the Perl the above share: an OSM data model, Overpass, geometry |
 | `etc/systemd/system/` | the units which run all of it |
 | `etc/` | PostgreSQL tuning, Apache configuration, render style patches |

@@ -219,8 +219,6 @@ Located in `etc/systemd/system/`:
 - `ogfutil-simplifiedAdminPolygons.timer` + `.service`: Admin boundary simplification
 - `ogfutil-adminPolygonsToMultimap.timer` + `.service`: Export admin boundaries
 - `ogfutil-userList.timer` + `.service`: User list exports
-- `dem-build.timer` + `.service`: elevation zones, weekly, rebuilding only
-  those whose contour squares have changed
 - `ogfutil-purgeWikiPagesSchedule[1-4].timer`: Wiki cleanup (multiple schedules)
 - `overpass-daily-activity.service` + `.timer`: Daily activity summaries
 
