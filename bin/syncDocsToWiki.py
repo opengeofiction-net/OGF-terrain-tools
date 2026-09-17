@@ -28,7 +28,7 @@ REFERER = "https://opengeofiction.net/"
 UA = "OGF-docs-internal-sync/1.0 (bot; Brothie)"
 BASE = os.path.expanduser("~/sync-ogf-docs-internal")
 REPO = os.path.join(BASE, "docs-internal")
-# Shared daily book lives in the OGF-terrain-tools repo's var/ (next to this
+# Shared daily book lives in the ogf-server-scripts repo's var/ (next to this
 # script), the same daily-book-*.ndjson that userPatrol/templateFix/revertQueue
 # write and dailyReview.py reads.
 VAR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "var")

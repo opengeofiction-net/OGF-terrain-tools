@@ -186,7 +186,7 @@ runcmd:
   # initialise OGF scripts
   - mkdir -p /opt/opengeofiction/tmp
   - chown -R ogf:ogf /opt/opengeofiction
-  - sudo -u ogf git clone https://github.com/opengeofiction-net/OGF-terrain-tools.git /opt/opengeofiction/OGF-terrain-tools
+  - sudo -u ogf git clone https://github.com/opengeofiction-net/ogf-server-scripts.git /opt/opengeofiction/ogf-server-scripts
   # build planet-dump-ng
   - /opt/opengeofiction/build/build-planet-dump-ng.sh
 EOF

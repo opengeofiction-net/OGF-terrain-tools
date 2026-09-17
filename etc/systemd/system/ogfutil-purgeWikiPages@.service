@@ -5,7 +5,7 @@ RequiresMountsFor=/opt/opengeofiction
 [Service]
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/purgeWikiPages.pl -ds '%i'
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/purgeWikiPages.pl -ds '%i'
 
 [Install]
 WantedBy=default.target

@@ -15,7 +15,7 @@ RequiresMountsFor=/opt/opengeofiction
 Type=oneshot
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/fetchDemData.sh %i
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/fetchDemData.sh %i
 # renderd holds the vrt open, so it has to be restarted before the expiry, or a
 # tile redrawn on demand comes from the old raster. The + runs this as root.
 #
@@ -32,7 +32,7 @@ ExecStartPost=+/bin/sh -c 'if [ -s /opt/opengeofiction/dem/changed-zones ]; then
 # still exited 0, so the run looked clean and expired nothing. The + gives this
 # step privilege and runuser immediately drops it to _renderd, the same account
 # tile-expire@.service uses for the same reason
-ExecStartPost=+/usr/sbin/runuser -u _renderd -- /opt/opengeofiction/OGF-terrain-tools/bin/renderDemZones.sh %i
+ExecStartPost=+/usr/sbin/runuser -u _renderd -- /opt/opengeofiction/ogf-server-scripts/bin/renderDemZones.sh %i
 # The re-render of a changed zone runs for as long as it takes
 TimeoutStartSec=infinity
 

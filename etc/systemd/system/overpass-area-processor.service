@@ -7,7 +7,7 @@ RequiresMountsFor=/opt/opengeofiction
 User=ogf
 Group=ogf
 WorkingDirectory=/opt/opengeofiction/overpass
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/overpassUpdateAreas.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/overpassUpdateAreas.sh
 Restart=no
 Nice=19
 

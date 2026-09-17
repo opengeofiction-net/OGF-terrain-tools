@@ -5,7 +5,7 @@
 # renderd holds the VRT open, so acting before the restart would draw the old
 # raster.
 #
-# /opt/opengeofiction/OGF-terrain-tools/bin/renderDemZones.sh <style>
+# /opt/opengeofiction/ogf-server-scripts/bin/renderDemZones.sh <style>
 #
 # One sweep of the tile cache, every zoom, one call. demExpireTiles.py finds the
 # metatiles which exist over a changed zone and render_expired marks them dirty:
@@ -41,7 +41,7 @@ fi
 STYLE=$1
 
 BASE=/opt/opengeofiction/dem
-TOOLS=${TOOLS:-/opt/opengeofiction/OGF-terrain-tools}
+TOOLS=${TOOLS:-/opt/opengeofiction/ogf-server-scripts}
 CHANGED_ZONES=${BASE}/changed-zones
 TILE_DIR=${TILE_DIR:-$(sed -n 's/^tile_dir=//p' /etc/renderd.conf 2>/dev/null | head -1)}
 TILE_DIR=${TILE_DIR:-/var/cache/renderd/tiles}

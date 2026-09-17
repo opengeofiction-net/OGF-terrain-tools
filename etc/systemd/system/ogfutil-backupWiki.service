@@ -5,7 +5,7 @@ RequiresMountsFor=/opt/opengeofiction
 [Service]
 User=ogf
 Group=ogf
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/backupWiki.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/backupWiki.sh
 
 [Install]
 WantedBy=default.target

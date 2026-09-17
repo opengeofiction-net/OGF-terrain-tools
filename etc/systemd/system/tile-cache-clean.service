@@ -16,7 +16,7 @@ Type=oneshot
 # account renderd writes as. Nothing here needs privilege beyond that
 User=_renderd
 Group=_renderd
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/cleanTileCache.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/cleanTileCache.sh
 # renderd is deliberately not restarted afterwards. A deleted metatile is drawn
 # again on the next request; a restart would drop the render queue for nothing
 #
