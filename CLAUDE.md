@@ -251,7 +251,9 @@ and sea separation, the hillshades, the contour vectors and the `.hgt` slices -
 is Danu's, and documented there. Nothing in this repository needs to know.
 
 `dem/active-zones.txt` says which zones the renderers should load, which is a
-different question from which are published - see `elevation/inactive`.
+different question from which are published. Danu decides it, from
+`elevation/inactive`, and documents both there; here it is simply the manifest
+`fetchDemData.sh` reads.
 
 ### Operational Data Flow
 
