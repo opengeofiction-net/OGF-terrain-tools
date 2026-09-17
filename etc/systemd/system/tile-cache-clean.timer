@@ -7,7 +7,8 @@ Description=Trim the renderd tile cache daily
 RefuseManualStart=no
 
 [Timer]
-# 04:00, clear of everything else: dem-build publishes at 03:00, the DEM
+# 04:00, clear of everything else: danu-build publishes at 03:00 - from the
+# danu-server package, not from here - the DEM
 # refresh runs at 06:00, the render timers at 11:11/23:11 and 11:13/23:13, and
 # external data at 12 and 42 minutes past.
 #

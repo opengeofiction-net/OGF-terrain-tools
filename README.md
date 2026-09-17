@@ -18,7 +18,7 @@ repository.
 | --- | --- |
 | `bin/*.sh` | backups, Overpass, tile rendering and replication, site up and down |
 | `bin/*.pl` | Overpass-driven jobs - coastline, territory polygons, continents, user lists, activity - and log analysis |
-| `bin/dem*` | the elevation process: contour squares to DEM, hillshade, relief and contours |
+| `bin/fetchDemData.sh`, `bin/renderDemZones.sh`, `bin/demExpireTiles.py` | the consuming half of the elevation process: fetch what Danu published, load it, expire the tiles it changed |
 | `lib/OGF/` | the Perl the above share: an OSM data model, Overpass, geometry |
 | `etc/systemd/system/` | the units which run all of it |
 | `etc/` | PostgreSQL tuning, Apache configuration, render style patches |
@@ -34,15 +34,21 @@ password and url.
 
 ## The elevation process
 
-Contours are drawn by hand, one `.osm` file per degree square, and are the source
-of everything else. `buildDemData.sh` on the utility server builds the zones
-whose squares have changed; `fetchDemData.sh` on a tile server fetches the
-result and loads it.
+The elevation pipeline lives in [danu](https://github.com/opengeofiction-net/danu)
+and is installed from the `danu-server` package. It builds the DEM from the
+contour squares mappers draw and publishes the rasters and contour extracts.
 
-    buildDemData.sh [zone ...]      # all changed zones, or the ones named
-    buildDemZone.sh <zone>          # one zone, start to finish
-    demMakeSquare.py <dir> N42E017  # a blank square to draw in
-    demRecoverSquares.py …          # squares back out of a DEM, for a lost zone
+What stays here is the consuming half, which runs on the tile servers and knows
+nothing about how the rasters were made:
+
+    fetchDemData.sh <style> [zone ...]   # fetch what Danu published and load it
+    renderDemZones.sh <style>            # expire the tiles over what changed
+
+The interface between the two is a published directory and a manifest:
+`active-zones.txt`, `<zone>/hillshade-<zfactor>.tif` and
+`<zone>/contours-<zone>.osm.pbf` under `data.opengeofiction.net/dem`. Nothing is
+imported across; changing one of those three is changing another repository's
+input.
 
 See *Admin:Elevation process* in the wiki for what it produces and why, and
 *Admin:Coastline process* for the sea level data it depends on.

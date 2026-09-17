@@ -7,7 +7,12 @@ Description=Refreshes the DEM hillshade and contours, for %i
 RefuseManualStart=no
 
 [Timer]
-# daily, three hours after dem-build.timer publishes. Monthly on the 5th, which
+# Daily, three hours after the elevation build publishes.
+#
+# That build is danu-build.timer, from the danu-server package, and it is not
+# in this repository: the three hours are an assumption about another
+# component's schedule rather than something this timer can guarantee. It runs
+# at 03:00 today. If that moves, this wants moving with it. Monthly on the 5th, which
 # this was, meant a zone rebuilt on the 6th waited until the 5th of the next
 # month to be drawn - up to thirty days for a change a mapper had already been
 # told was published.
