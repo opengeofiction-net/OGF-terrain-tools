@@ -1,7 +1,7 @@
 #! /usr/bin/perl -w -CSDA
 # Correct issue with active_storage files which do not exist on disk
 
-use lib '/opt/opengeofiction/OGF-terrain-tools/lib';
+use lib '/opt/opengeofiction/ogf-server-scripts/lib';
 use strict;
 use warnings;
 use DBI;

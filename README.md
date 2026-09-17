@@ -1,7 +1,7 @@
-# OGF-terrain-tools
+# ogf-server-scripts
 
 Scripts, systemd units and configuration for running [OpenGeofiction](https://opengeofiction.net).
-Checked out on each server at `/opt/opengeofiction/OGF-terrain-tools` and run
+Checked out on each server at `/opt/opengeofiction/ogf-server-scripts` and run
 from there, mostly by the systemd units in `etc/systemd/system`.
 
 Not a Perl distribution, despite the history: there is nothing to install and no

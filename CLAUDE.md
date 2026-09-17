@@ -9,7 +9,7 @@ platform: backups, tile rendering and replication, Overpass, coastline and
 elevation processing, territory polygons, monitoring.
 
 Not a Perl distribution, despite the history. There is nothing to install: it is
-checked out at `/opt/opengeofiction/OGF-terrain-tools` on each server and run
+checked out at `/opt/opengeofiction/ogf-server-scripts` on each server and run
 from there, mostly by the units in `etc/systemd/system`.
 
 The infrastructure is documented in the admin wiki, built from the `docs`
@@ -323,7 +323,7 @@ External tools used by operational scripts:
 ## Environment Assumptions
 
 Most operational scripts assume deployment under `/opt/opengeofiction/`:
-- `/opt/opengeofiction/OGF-terrain-tools/`: This repository
+- `/opt/opengeofiction/ogf-server-scripts/`: This repository
 - `/opt/opengeofiction/backup/`: Backup staging directory
 - `/opt/opengeofiction/backup-to-s3-queue/`: S3 upload queue
 - `/opt/opengeofiction/overpass/`: Overpass API data and config

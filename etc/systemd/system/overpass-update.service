@@ -8,7 +8,7 @@ RequiresMountsFor=/opt/opengeofiction
 User=ogf
 Group=ogf
 WorkingDirectory=/opt/opengeofiction/overpass
-ExecStart=/opt/opengeofiction/OGF-terrain-tools/bin/overpassUpdateDB.sh
+ExecStart=/opt/opengeofiction/ogf-server-scripts/bin/overpassUpdateDB.sh
 Restart=on-success
 
 [Install]
