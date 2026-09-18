@@ -1,5 +1,5 @@
 [Unit]
-Description=Changeset summaries for the automated reports
+Description=Changeset summaries for the automated reports, from ogf.changeset_ip
 RequiresMountsFor=/opt/opengeofiction
 
 [Service]

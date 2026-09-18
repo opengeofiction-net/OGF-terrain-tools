@@ -132,7 +132,6 @@ bin/sysStatsPassenger.sh
 bin/parseSysStats.pl
   # Parses and analyzes system statistics
 
-bin/parseAccessLog.pl
   # Parses Apache access logs into a database. On cron on the API server,
   # with checkUser.pl run against its output
 bin/debugDevelopmentLog.pl
@@ -162,7 +161,6 @@ bin/createLinode.sh
 
 # Ad hoc
 bin/checkUser.pl
-  # On the API server, against parseAccessLog.pl's output
 bin/checkActiveStorageBlobs.pl
   # Storage validation. Niche
 bin/syncDocsToWiki.py
