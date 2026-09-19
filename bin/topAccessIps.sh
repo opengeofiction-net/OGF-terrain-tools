@@ -8,5 +8,11 @@ SITE=${SITE:-/var/www/html/opengeofiction.net/log}
 DATA=${DATA:-/var/www/html/data.opengeofiction.net/logs}
 TOP=${TOP:-25}
 
-cat "${SITE}/access.log.1" "${SITE}/access.log" "${DATA}/access.log.1" "${DATA}/access.log" 2>/dev/null \
-  | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "${TOP}"
+# only the logs that exist: a fresh server has no rotated .1 yet, and under
+# pipefail a missing file would fail the unit despite the output being right
+logs=()
+for f in "${SITE}/access.log.1" "${SITE}/access.log" "${DATA}/access.log.1" "${DATA}/access.log"; do
+  [ -r "$f" ] && logs+=("$f")
+done
+[ ${#logs[@]} -gt 0 ] || { echo "no access logs found under ${SITE} or ${DATA}" >&2; exit 1; }
+cat "${logs[@]}" | awk '{print $1}' | sort | uniq -c | sort -nr | head -n "${TOP}"
